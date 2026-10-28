@@ -1,0 +1,21 @@
+{
+  "name": "Whack‑a‑Mole",
+  "short_name": "Mole",
+  "description": "A tiny whack‑a‑mole game you can play in the browser or from the home‑screen.",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#f5f5f5",
+  "theme_color": "#4a90e2",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
