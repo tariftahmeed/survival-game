@@ -265,6 +265,8 @@ if('serviceWorker' in navigator){
   navigator.serviceWorker.register('sw.js')
     .catch(e=>console.warn('SW registration failed',e));
 }
+/* ---------- MODERN LISTENER FOR THE “Play Again” BUTTON ---------- */
+document.getElementById('retry').addEventListener('click', startGame);
 </script>
 </body>
 </html>
