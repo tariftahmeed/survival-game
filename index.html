@@ -166,24 +166,67 @@ function collide(){
 function draw(){
   ctx.fillStyle='#4caf50';
   ctx.fillRect(0,0,canvas.width,canvas.height);
+
   ctx.strokeStyle='rgba(255,255,255,.08)';
+
   for(let x=0;x<canvas.width;x+=40){
-    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x,0);
+    ctx.lineTo(x,canvas.height);
+    ctx.stroke();
   }
+
   for(let y=0;y<canvas.height;y+=40){
-    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0,y);
+    ctx.lineTo(canvas.width,y);
+    ctx.stroke();
   }
+
+  // Player
   ctx.fillStyle='gold';
   ctx.fillRect(player.x,player.y,player.w,player.h);
-  ctx.fillStyle='#e53935';
-  enemies.forEach(e=>ctx.fillRect(e.x,e.y,e.w,e.h));
+
+  // Enemies as emojis
+  ctx.font='28px Arial';
+  ctx.textAlign='center';
+  ctx.textBaseline='middle';
+
+  enemies.forEach(e => {
+    ctx.fillText(
+      '🦠',
+      e.x + e.w / 2,
+      e.y + e.h / 2
+    );
+  });
+
+  // Mobile joystick
   if(joystick.active){
-    ctx.beginPath(); ctx.strokeStyle='rgba(255,255,255,.4)'; ctx.lineWidth=3;
-    ctx.arc(joystick.baseX,joystick.baseY,40,0,Math.PI*2); ctx.stroke();
-    ctx.beginPath(); ctx.fillStyle='rgba(255,255,255,.5)';
-    ctx.arc(joystick.baseX+joystick.dx, joystick.baseY+joystick.dy,20,0,Math.PI*2); ctx.fill();
+    ctx.beginPath();
+    ctx.strokeStyle='rgba(255,255,255,.4)';
+    ctx.lineWidth=3;
+    ctx.arc(
+      joystick.baseX,
+      joystick.baseY,
+      40,
+      0,
+      Math.PI*2
+    );
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.fillStyle='rgba(255,255,255,.5)';
+    ctx.arc(
+      joystick.baseX + joystick.dx,
+      joystick.baseY + joystick.dy,
+      20,
+      0,
+      Math.PI*2
+    );
+    ctx.fill();
   }
 }
+
 
 /* ---- MAIN LOOP ---- */
 function loop(timestamp){
