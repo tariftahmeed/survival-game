@@ -6,26 +6,15 @@
       content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Top Down Survival Mobile</title>
 <style>
+/* (your existing CSS – keep it exactly as you had it) */
 html,body{margin:0;height:100%;overflow:hidden;background:#111;font-family:Arial,sans-serif}
 body{display:flex;flex-direction:column;align-items:center}
-header{
-  width:100%;background:#223;color:#fff;text-align:center;
-  padding:10px;font-size:20px;position:relative;
-}
-#leaderboard{
-  position:fixed;top:10px;right:10px;
-  background:rgba(0,0,0,.6);color:#fff;
-  padding:6px 10px;border-radius:6px;
-  font-size:0.85rem;line-height:1.3;
-}
+header{width:100%;background:#223;color:#fff;text-align:center;padding:10px;font-size:20px;position:relative}
+#leaderboard{position:fixed;top:10px;right:10px;background:rgba(0,0,0,.6);color:#fff;padding:6px 10px;border-radius:6px;font-size:0.85rem;line-height:1.3}
 #leaderboard h3{margin:0 0 4px 0;font-size:0.95rem;text-align:center}
 #leaderboard ol{margin:0;padding-left:20px}
 canvas{background:#4caf50;border:2px solid #222;touch-action:none;flex:1;max-width:100%;margin-top:4px}
-#overlay{
-  position:fixed;inset:0;background:rgba(0,0,0,.85);
-  display:none;justify-content:center;align-items:center;
-  flex-direction:column;color:#fff;text-align:center;
-}
+#overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;justify-content:center;align-items:center;flex-direction:column;color:#fff;text-align:center}
 button{padding:12px 22px;font-size:18px;cursor:pointer}
 </style>
 </head>
@@ -45,8 +34,9 @@ button{padding:12px 22px;font-size:18px;cursor:pointer}
 
 <div id="overlay"><h1>Game Over</h1><p id="final"></p><button onclick="startGame()">Play Again</button></div>
 
-<!-- ====================== FIREBASE INITIALISATION ====================== -->
+<!-- ====================== FIREBASE & FIRESTORE ====================== -->
 <script type="module">
+/* ---------- IMPORT THE SDK (v10.7) ---------- */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js";
 import {
   getFirestore,
@@ -58,52 +48,50 @@ import {
   limit
 } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
 
-/* ---- COPY‑PASTE YOUR OWN CONFIG FROM THE Firebase CONSOLE ---- */
-const firebaseConfig = {
-  apiKey:           "YOUR_API_KEY",
-  authDomain:       "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId:        "YOUR_PROJECT_ID",
-  storageBucket:    "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId:"YOUR_SENDER_ID",
-  appId:            "YOUR_APP_ID"
-};
-/* ------------------------------------------------------------ */
+/* ---------- YOUR FIREBASE CONFIG (copy‑paste from step 3) ---------- */
+  const firebaseConfig = {
+    apiKey: "AIzaSyA6QM9EX21aAG8fmlcv4_z5ZtvNblha-KM",
+    authDomain: "survival-global-lb.firebaseapp.com",
+    projectId: "survival-global-lb",
+    storageBucket: "survival-global-lb.firebasestorage.app",
+    messagingSenderId: "348885828075",
+    appId: "1:348885828075:web:66ba19f95cb9347deb99ae"
+  };
 
+/* ---------- INITIALISE FIREBASE & GET Firestore ---------- */
 const app = initializeApp(firebaseConfig);
 const db  = getFirestore(app);
-const scoresCol = collection(db, "survivalScores");   // will be created automatically
+const scoresCol = collection(db, "survivalScores");   // will be created automatically on first write
 
-/* --------------------------------------------------------------
-   FUNCTIONS THAT INTERACT WITH FIRESTORE
-   -------------------------------------------------------------- */
-async function pushScoreToLeaderboard(name, score){
-  // write the new score
-  await addDoc(scoresCol, {name, score, ts: Date.now()});
-  // after writing, refresh the UI
-  await updateLeaderboardUI();
+/* ---------- LEADERBOARD HELPERS ---------- */
+// Write a new (name,score) entry
+async function pushScore(name, score){
+  await addDoc(scoresCol,{name, score, ts: Date.now()});
+  await refreshLeaderboard();          // refresh the UI right after we write
 }
 
-async function loadTop3(){
-  // query the 3 highest scores, ordered descending
+// Get the 3 highest scores (global)
+async function fetchTop3(){
   const q = query(scoresCol, orderBy("score","desc"), limit(3));
   const snap = await getDocs(q);
   const list = [];
-  snap.forEach(doc=>{ const data = doc.data(); list.push({name:data.name, score:data.score}); });
+  snap.forEach(doc=>{ const d = doc.data(); list.push({name:d.name, score:d.score}); });
   return list;
 }
 
-async function updateLeaderboardUI(){
-  const topList = document.getElementById('topList');
-  topList.innerHTML = '';                         // clear
-  const board = await loadTop3();
-  board.forEach(entry=>{
+// Render the top‑3 in the corner of the page
+async function refreshLeaderboard(){
+  const top = await fetchTop3();
+  const ol = document.getElementById('topList');
+  ol.innerHTML = "";
+  top.forEach(entry=>{
     const li = document.createElement('li');
     li.textContent = `${entry.name}: ${entry.score}s`;
-    topList.appendChild(li);
+    ol.appendChild(li);
   });
 }
 
-/* ====================== GAME CODE (unchanged except leaderboard calls) ====================== */
+/* ====================== GAME CODE ====================== */
 const canvas = document.getElementById('game');
 const ctx    = canvas.getContext('2d');
 
@@ -111,29 +99,21 @@ let player, enemies=[], score=0, startTime=0, lastSpawn=0, running=false, anim;
 let playerName = '';
 const joystick={active:false,baseX:0,baseY:0,dx:0,dy:0,max:60};
 
-/* ---------- PLAYER NAME ----------
-   ask once, store in localStorage for convenience */
+/* ---- PLAYER NAME (kept locally for convenience) ---- */
 function askForName(){
   const stored = localStorage.getItem('survivalPlayerName');
   if(stored){ playerName = stored; }
   else{
     let name = '';
-    while(!name){ name = prompt('Enter your name (appears on the leaderboard)'); }
+    while(!name){ name = prompt('Enter your name (will appear on the global leaderboard)'); }
     playerName = name.trim();
     localStorage.setItem('survivalPlayerName', playerName);
   }
   document.getElementById('playerName').textContent = playerName;
 }
 
-/* ---------- RESET ----------
-   (player & enemies) */
-function reset(){
-  player = {x:220, y:330, w:30, h:30, speed:4.5};
-  enemies = [];
-}
-
-/* ---------- SPAWN ENEMY ----------
-   from a random side */
+/* ---- BASIC GAME SETUP ---- */
+function reset(){ player={x:220,y:330,w:30,h:30,speed:4.5}; enemies=[]; }
 function spawnEnemy(){
   const side = Math.floor(Math.random()*4);
   let x,y;
@@ -143,9 +123,6 @@ function spawnEnemy(){
   if(side===3){ x=-30; y=Math.random()*canvas.height; }
   enemies.push({x,y,w:24,h:24,s:1.6});
 }
-
-/* ---------- PLAYER UPDATE ----------
-   joystick handling */
 function updatePlayer(){
   if(joystick.active){
     const mag = Math.hypot(joystick.dx, joystick.dy);
@@ -157,9 +134,6 @@ function updatePlayer(){
   player.x = Math.max(0, Math.min(canvas.width-player.w, player.x));
   player.y = Math.max(0, Math.min(canvas.height-player.h, player.y));
 }
-
-/* ---------- ENEMIES MOVE ----------
-   each enemy chases the player */
 function updateEnemies(){
   enemies.forEach(e=>{
     const dx = player.x - e.x,
@@ -169,9 +143,6 @@ function updateEnemies(){
     e.y += (dy/d) * e.s;
   });
 }
-
-/* ---------- ENEMY‑ENEMY COLLISION ----------
-   remove both squares when they touch */
 function handleEnemyCollisions(){
   const toRemove = new Set();
   for(let i=0;i<enemies.length;i++){
@@ -185,17 +156,13 @@ function handleEnemyCollisions(){
   }
   enemies = enemies.filter((_,idx)=>!toRemove.has(idx));
 }
-
-/* ---------- PLAYER‑ENEMY COLLISION ----------
-   ends the game */
 function collide(){
   return enemies.some(e=>
     player.x < e.x+e.w && player.x+player.w > e.x &&
     player.y < e.y+e.h && player.y+player.h > e.y);
 }
 
-/* ---------- DRAW ----------
-   background, grid, player, enemies, joystick */
+/* ---- DRAW ---- */
 function draw(){
   ctx.fillStyle='#4caf50';
   ctx.fillRect(0,0,canvas.width,canvas.height);
@@ -211,56 +178,41 @@ function draw(){
   ctx.fillStyle='#e53935';
   enemies.forEach(e=>ctx.fillRect(e.x,e.y,e.w,e.h));
   if(joystick.active){
-    ctx.beginPath();
-    ctx.strokeStyle='rgba(255,255,255,.4)';
-    ctx.lineWidth=3;
-    ctx.arc(joystick.baseX,joystick.baseY,40,0,Math.PI*2);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.fillStyle='rgba(255,255,255,.5)';
-    ctx.arc(joystick.baseX+joystick.dx,
-            joystick.baseY+joystick.dy,20,0,Math.PI*2);
-    ctx.fill();
+    ctx.beginPath(); ctx.strokeStyle='rgba(255,255,255,.4)'; ctx.lineWidth=3;
+    ctx.arc(joystick.baseX,joystick.baseY,40,0,Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.fillStyle='rgba(255,255,255,.5)';
+    ctx.arc(joystick.baseX+joystick.dx, joystick.baseY+joystick.dy,20,0,Math.PI*2); ctx.fill();
   }
 }
 
-/* ---------- MAIN LOOP ----------
-   runs while `running===true` */
+/* ---- MAIN LOOP ---- */
 function loop(timestamp){
   if(!running) return;
   score = Math.floor((Date.now()-startTime)/1000);
   document.getElementById('score').textContent = score;
   if(timestamp - lastSpawn > 1200){ spawnEnemy(); lastSpawn = timestamp; }
-
-  updatePlayer();
-  updateEnemies();
-  handleEnemyCollisions();   // <‑‑ removes colliding enemies
-  draw();
-
+  updatePlayer(); updateEnemies(); handleEnemyCollisions(); draw();
   if(collide()){
     running = false;
     cancelAnimationFrame(anim);
-    document.getElementById('final').textContent =
-        'You survived '+score+' seconds';
-    document.getElementById('overlay').style.display='flex';
-    // ----> STORE THE RESULT IN THE CLOUD <----
-    pushScoreToLeaderboard(playerName, score);
+    document.getElementById('final').textContent = `You survived ${score} seconds`;
+    document.getElementById('overlay').style.display = 'flex';
+    // ----> RECORD THE RESULT GLOBALLY <----
+    pushScore(playerName, score);
     return;
   }
   anim = requestAnimationFrame(loop);
 }
 
-/* ---------- START / RESTART ----------
-   also asks for the name the very first time */
+/* ---- START / RESTART ---- */
 function startGame(){
-  if(!playerName) askForName();         // will read from localStorage if already stored
-  document.getElementById('overlay').style.display='none';
+  if(!playerName) askForName();        // prompt only once per device
+  document.getElementById('overlay').style.display = 'none';
   score = 0; startTime = Date.now(); lastSpawn = 0;
   reset(); running = true; requestAnimationFrame(loop);
 }
 
-/* ---------- JOYSTICK INPUT ----------
-   (touch / mouse) */
+/* ---- JOYSTICK INPUT (touch / mouse) ---- */
 function pos(e){
   const r = canvas.getBoundingClientRect();
   return {
@@ -272,8 +224,7 @@ canvas.addEventListener('pointerdown',e=>{
   const p = pos(e);
   if(p.x < canvas.width/2){
     joystick.active = true;
-    joystick.baseX = p.x; joystick.baseY = p.y;
-    joystick.dx = joystick.dy = 0;
+    joystick.baseX = p.x; joystick.baseY = p.y; joystick.dx = joystick.dy = 0;
   }
 });
 canvas.addEventListener('pointermove',e=>{
@@ -288,8 +239,7 @@ canvas.addEventListener('pointermove',e=>{
 canvas.addEventListener('pointerup',()=>{ joystick.active=false; joystick.dx=0; joystick.dy=0; });
 canvas.addEventListener('pointercancel',()=>{ joystick.active=false; });
 
-/* ---------- RESPONSIVE CANVAS ----------
-   keeps the 480×700 aspect ratio */
+/* ---- KEEP CANVAS ASPECT RATIO ---- */
 function resize(){
   const maxW = Math.min(window.innerWidth,480);
   canvas.style.width  = maxW+'px';
@@ -298,22 +248,19 @@ function resize(){
 window.addEventListener('resize',resize);
 resize();
 
-/* ---------- PAGE LOAD ----------
-   show leaderboard immediately, then start the first game */
+/* ---- PAGE LOAD ----
+   * Show stored player name (so the prompt isn’t shown repeatedly)
+   * Load the **global** top‑3 from Firestore
+   * Start the first round automatically
+   ------------------------------------------------------- */
 window.addEventListener('load',async()=>{
-  // load stored name (if any) – this is only for convenience, not required for the leaderboard
   const stored = localStorage.getItem('survivalPlayerName');
   if(stored){ playerName = stored; document.getElementById('playerName').textContent = playerName; }
-
-  // show the current global top‑3 (reads from Firestore)
-  await updateLeaderboardUI();
-
-  // start the first round
-  startGame();
+  await refreshLeaderboard();    // pulls the *global* list from Firestore
+  startGame();                   // auto‑start the first game
 });
 
-/* ---------- OPTIONAL SERVICE‑WORKER ----------
-   (same as before, keep if you want offline caching) */
+/* ---- OPTIONAL SERVICE‑WORKER (offline caching) ---- */
 if('serviceWorker' in navigator){
   navigator.serviceWorker.register('sw.js')
     .catch(e=>console.warn('SW registration failed',e));
