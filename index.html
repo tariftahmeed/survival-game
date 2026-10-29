@@ -265,6 +265,12 @@ if('serviceWorker' in navigator){
   navigator.serviceWorker.register('sw.js')
     .catch(e=>console.warn('SW registration failed',e));
 }
+
+/* ---------------------------------------------------------------
+   Expose the functions that the HTML still calls directly
+   --------------------------------------------------------------- */
+window.startGame = startGame;          // needed for the “Play Again” button
+window.pushScore = pushScore;          // (optional – if you ever call it from HTML)
 </script>
 </body>
 </html>
