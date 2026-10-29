@@ -17,26 +17,194 @@ button{padding:12px 22px;font-size:18px}
 <header>🎮 Survival - Score: <span id="score">0</span></header>
 <canvas id="game" width="480" height="700"></canvas>
 <div id="overlay"><h1>Game Over</h1><p id="final"></p><button onclick="startGame()">Play Again</button></div>
+
 <script>
 const canvas=document.getElementById('game');
 const ctx=canvas.getContext('2d');
-let player,enemies=[],score=0,startTime=0,lastSpawn=0,running=false,anim;
+let player,
+    enemies=[],          // we need a mutable array because we will delete entries
+    score=0,
+    startTime=0,
+    lastSpawn=0,
+    running=false,
+    anim;
+
 const joystick={active:false,baseX:0,baseY:0,dx:0,dy:0,max:60};
-function reset(){player={x:220,y:330,w:30,h:30,speed:4.5};enemies=[];}
-function spawnEnemy(){let s=Math.floor(Math.random()*4),x,y; if(s===0){x=Math.random()*canvas.width;y=-30;} if(s===1){x=canvas.width+30;y=Math.random()*canvas.height;} if(s===2){x=Math.random()*canvas.width;y=canvas.height+30;} if(s===3){x=-30;y=Math.random()*canvas.height;} enemies.push({x,y,w:24,h:24,s:1.6});}
-function updatePlayer(){ if(joystick.active){ let mag=Math.hypot(joystick.dx,joystick.dy); if(mag>2){ player.x+=(joystick.dx/mag)*player.speed; player.y+=(joystick.dy/mag)*player.speed; } } player.x=Math.max(0,Math.min(canvas.width-player.w,player.x)); player.y=Math.max(0,Math.min(canvas.height-player.h,player.y)); }
-function updateEnemies(){enemies.forEach(e=>{let dx=player.x-e.x,dy=player.y-e.y,d=Math.hypot(dx,dy)||1;e.x+=(dx/d)*e.s;e.y+=(dy/d)*e.s;});}
-function collide(){return enemies.some(e=>player.x<e.x+e.w&&player.x+player.w>e.x&&player.y<e.y+e.h&&player.y+player.h>e.y);} 
-function draw(){ctx.fillStyle='#4caf50';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.strokeStyle='rgba(255,255,255,.08)';for(let x=0;x<canvas.width;x+=40){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,canvas.height);ctx.stroke();}for(let y=0;y<canvas.height;y+=40){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(canvas.width,y);ctx.stroke();}ctx.fillStyle='gold';ctx.fillRect(player.x,player.y,player.w,player.h);ctx.fillStyle='#e53935';enemies.forEach(e=>ctx.fillRect(e.x,e.y,e.w,e.h));if(joystick.active){ctx.beginPath();ctx.strokeStyle='rgba(255,255,255,.4)';ctx.lineWidth=3;ctx.arc(joystick.baseX,joystick.baseY,40,0,Math.PI*2);ctx.stroke();ctx.beginPath();ctx.fillStyle='rgba(255,255,255,.5)';ctx.arc(joystick.baseX+joystick.dx,joystick.baseY+joystick.dy,20,0,Math.PI*2);ctx.fill();}}
-function loop(t){if(!running)return;score=Math.floor((Date.now()-startTime)/1000);document.getElementById('score').textContent=score;if(t-lastSpawn>1200){spawnEnemy();lastSpawn=t;}updatePlayer();updateEnemies();draw();if(collide()){running=false;cancelAnimationFrame(anim);document.getElementById('final').textContent='You survived '+score+' seconds';document.getElementById('overlay').style.display='flex';return;}anim=requestAnimationFrame(loop);} 
-function startGame(){document.getElementById('overlay').style.display='none';score=0;startTime=Date.now();lastSpawn=0;reset();running=true;requestAnimationFrame(loop);} 
-function pos(e){const r=canvas.getBoundingClientRect();return{x:(e.clientX-r.left)*canvas.width/r.width,y:(e.clientY-r.top)*canvas.height/r.height};}
-canvas.addEventListener('pointerdown',e=>{const p=pos(e);if(p.x<canvas.width/2){joystick.active=true;joystick.baseX=p.x;joystick.baseY=p.y;joystick.dx=0;joystick.dy=0;}});
-canvas.addEventListener('pointermove',e=>{if(!joystick.active)return;const p=pos(e);let dx=p.x-joystick.baseX,dy=p.y-joystick.baseY;let d=Math.hypot(dx,dy);if(d>joystick.max){dx=dx/d*joystick.max;dy=dy/d*joystick.max;}joystick.dx=dx;joystick.dy=dy;});
-canvas.addEventListener('pointerup',()=>{joystick.active=false;joystick.dx=0;joystick.dy=0;});
-canvas.addEventListener('pointercancel',()=>{joystick.active=false;});
-function resize(){const w=Math.min(window.innerWidth,480);canvas.style.width=w+'px';canvas.style.height=(w*700/480)+'px';}
-window.addEventListener('resize',resize);resize();startGame();
+
+/* ---------- INITIALISE ---------- */
+function reset(){
+  player={x:220,y:330,w:30,h:30,speed:4.5};
+  enemies=[];
+}
+
+/* ---------- SPAWN ENEMY ---------- */
+function spawnEnemy(){
+  let s=Math.floor(Math.random()*4),x,y;
+  if(s===0){ x=Math.random()*canvas.width; y=-30; }            // top
+  if(s===1){ x=canvas.width+30;       y=Math.random()*canvas.height; } // right
+  if(s===2){ x=Math.random()*canvas.width; y=canvas.height+30; } // bottom
+  if(s===3){ x=-30;                    y=Math.random()*canvas.height; } // left
+  enemies.push({x,y,w:24,h:24,s:1.6});
+}
+
+/* ---------- PLAYER UPDATE ---------- */
+function updatePlayer(){
+  if(joystick.active){
+    let mag=Math.hypot(joystick.dx,joystick.dy);
+    if(mag>2){
+      player.x += (joystick.dx/mag)*player.speed;
+      player.y += (joystick.dy/mag)*player.speed;
+    }
+  }
+  player.x = Math.max(0, Math.min(canvas.width-player.w, player.x));
+  player.y = Math.max(0, Math.min(canvas.height-player.h, player.y));
+}
+
+/* ---------- ENEMY MOVE ---------- */
+function updateEnemies(){
+  enemies.forEach(e=>{
+    const dx = player.x - e.x,
+          dy = player.y - e.y,
+          d  = Math.hypot(dx,dy) || 1;
+    e.x += (dx/d) * e.s;
+    e.y += (dy/d) * e.s;
+  });
+}
+
+/* ---------- ENEMY‑ENEMY COLLISION (remove both) ---------- */
+function handleEnemyCollisions(){
+  const toRemove = new Set();
+  for(let i=0;i<enemies.length;i++){
+    for(let j=i+1;j<enemies.length;j++){
+      const a=enemies[i], b=enemies[j];
+      if(a.x < b.x+b.w && a.x+a.w > b.x &&
+         a.y < b.y+b.h && a.y+a.h > b.y){
+        toRemove.add(i);
+        toRemove.add(j);
+      }
+    }
+  }
+  enemies = enemies.filter((_,idx)=>!toRemove.has(idx));
+}
+
+/* ---------- PLAYER‑ENEMY COLLISION (game over) ---------- */
+function collide(){
+  return enemies.some(e=>
+    player.x < e.x+e.w && player.x+player.w > e.x &&
+    player.y < e.y+e.h && player.y+player.h > e.y);
+}
+
+/* ---------- DRAW ---------- */
+function draw(){
+  ctx.fillStyle='#4caf50';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.strokeStyle='rgba(255,255,255,.08)';
+  for(let x=0;x<canvas.width;x+=40){
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke();
+  }
+  for(let y=0;y<canvas.height;y+=40){
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke();
+  }
+  ctx.fillStyle='gold';
+  ctx.fillRect(player.x,player.y,player.w,player.h);
+  ctx.fillStyle='#e53935';
+  enemies.forEach(e=>ctx.fillRect(e.x,e.y,e.w,e.h));
+  if(joystick.active){
+    ctx.beginPath();
+    ctx.strokeStyle='rgba(255,255,255,.4)';
+    ctx.lineWidth=3;
+    ctx.arc(joystick.baseX,joystick.baseY,40,0,Math.PI*2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.fillStyle='rgba(255,255,255,.5)';
+    ctx.arc(joystick.baseX+joystick.dx,joystick.baseY+joystick.dy,20,0,Math.PI*2);
+    ctx.fill();
+  }
+}
+
+/* ---------- MAIN LOOP ---------- */
+function loop(timestamp){
+  if(!running) return;
+  score = Math.floor((Date.now()-startTime)/1000);
+  document.getElementById('score').textContent = score;
+
+  if(timestamp - lastSpawn > 1200){
+    spawnEnemy();
+    lastSpawn = timestamp;
+  }
+
+  updatePlayer();
+  updateEnemies();
+  handleEnemyCollisions();      // <-- REMOVE ENEMIES THAT HIT EACH OTHER
+
+  draw();
+
+  if(collide()){
+    running = false;
+    cancelAnimationFrame(anim);
+    document.getElementById('final').textContent =
+        'You survived '+score+' seconds';
+    document.getElementById('overlay').style.display='flex';
+    return;
+  }
+  anim = requestAnimationFrame(loop);
+}
+
+/* ---------- START / RESTART ---------- */
+function startGame(){
+  document.getElementById('overlay').style.display='none';
+  score = 0;
+  startTime = Date.now();
+  lastSpawn = 0;
+  reset();
+  running = true;
+  requestAnimationFrame(loop);
+}
+
+/* ---------- JOYSTICK INPUT ---------- */
+function pos(e){
+  const r = canvas.getBoundingClientRect();
+  return {
+    x: (e.clientX - r.left) * canvas.width / r.width,
+    y: (e.clientY - r.top)  * canvas.height/ r.height
+  };
+}
+canvas.addEventListener('pointerdown',e=>{
+  const p = pos(e);
+  if(p.x < canvas.width/2){
+    joystick.active = true;
+    joystick.baseX = p.x;
+    joystick.baseY = p.y;
+    joystick.dx = joystick.dy = 0;
+  }
+});
+canvas.addEventListener('pointermove',e=>{
+  if(!joystick.active) return;
+  const p = pos(e);
+  let dx = p.x - joystick.baseX,
+      dy = p.y - joystick.baseY;
+  const d = Math.hypot(dx,dy);
+  if(d > joystick.max){
+    dx = dx/d * joystick.max;
+    dy = dy/d * joystick.max;
+  }
+  joystick.dx = dx;
+  joystick.dy = dy;
+});
+canvas.addEventListener('pointerup',()=>{ joystick.active=false; joystick.dx=0; joystick.dy=0; });
+canvas.addEventListener('pointercancel',()=>{ joystick.active=false; });
+
+/* ---------- KEEP ASPECT RATIO ON RESIZE ---------- */
+function resize(){
+  const w = Math.min(window.innerWidth,480);
+  canvas.style.width = w + 'px';
+  canvas.style.height = (w * 700 / 480) + 'px';
+}
+window.addEventListener('resize',resize);
+resize();
+
+/* ---------- AUTO‑START ---------- */
+startGame();
 </script>
 </body>
 </html>
