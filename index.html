@@ -183,22 +183,28 @@ function draw(){
     ctx.stroke();
   }
 
-  // Player
-  ctx.fillStyle='gold';
-  ctx.fillRect(player.x,player.y,player.w,player.h);
+ // Player
+ctx.font='30px Arial';
+ctx.textAlign='center';
+ctx.textBaseline='middle';
 
-  // Enemies as emojis
-  ctx.font='28px Arial';
-  ctx.textAlign='center';
-  ctx.textBaseline='middle';
+ctx.fillText(
+  '🫨',
+  player.x + player.w / 2,
+  player.y + player.h / 2
+);
 
-  enemies.forEach(e => {
-    ctx.fillText(
-      '🦠',
-      e.x + e.w / 2,
-      e.y + e.h / 2
-    );
-  });
+// Enemies
+ctx.font='28px Arial';
+
+enemies.forEach(e => {
+  ctx.fillText(
+    '👾',
+    e.x + e.w / 2,
+    e.y + e.h / 2
+  );
+});
+
 
   // Mobile joystick
   if(joystick.active){
