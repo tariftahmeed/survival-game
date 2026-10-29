@@ -1,6 +1,6 @@
 // sw.js – Very small cache‑first service worker
 
-const CACHE_NAME = 'whack-mole-v1';
+const CACHE_NAME = 'survival-v1';
 const ASSETS = [
   '/',
   'index.html',
