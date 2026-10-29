@@ -8,14 +8,10 @@
 <style>
 html,body{margin:0;height:100%;overflow:hidden;background:#111;font-family:Arial,sans-serif}
 body{display:flex;flex-direction:column;align-items:center}
-
-/* ------- HEADER (score + player name) ------- */
 header{
   width:100%;background:#223;color:#fff;text-align:center;
   padding:10px;font-size:20px;position:relative;
 }
-
-/* place the leaderboard in the upper‑right corner of the page (outside the header) */
 #leaderboard{
   position:fixed;top:10px;right:10px;
   background:rgba(0,0,0,.6);color:#fff;
@@ -24,22 +20,13 @@ header{
 }
 #leaderboard h3{margin:0 0 4px 0;font-size:0.95rem;text-align:center}
 #leaderboard ol{margin:0;padding-left:20px}
-
-/* ------- CANVAS ------- */
-canvas{
-  background:#4caf50;border:2px solid #222;touch-action:none;
-  flex:1;max-width:100%;margin-top:4px;
-}
-
-/* ------- GAME OVER OVERLAY ------- */
+canvas{background:#4caf50;border:2px solid #222;touch-action:none;flex:1;max-width:100%;margin-top:4px}
 #overlay{
   position:fixed;inset:0;background:rgba(0,0,0,.85);
   display:none;justify-content:center;align-items:center;
   flex-direction:column;color:#fff;text-align:center;
 }
 button{padding:12px 22px;font-size:18px;cursor:pointer}
-
-/* make the canvas keep its original aspect ratio on resize */
 </style>
 </head>
 
@@ -49,7 +36,6 @@ button{padding:12px 22px;font-size:18px;cursor:pointer}
   &nbsp;|&nbsp;Score: <span id="score">0</span>
 </header>
 
-<!-- leaderboard sits in the top‑right of the whole page -->
 <div id="leaderboard">
   <h3>Top 3</h3>
   <ol id="topList"></ol>
@@ -59,57 +45,57 @@ button{padding:12px 22px;font-size:18px;cursor:pointer}
 
 <div id="overlay"><h1>Game Over</h1><p id="final"></p><button onclick="startGame()">Play Again</button></div>
 
-<script>
-/* ==============================================================
-   CONFIG & GLOBALS
-   ============================================================== */
-const canvas = document.getElementById('game');
-const ctx    = canvas.getContext('2d');
+<!-- ====================== FIREBASE INITIALISATION ====================== -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js";
+import {
+  getFirestore,
+  collection,
+  addDoc,
+  getDocs,
+  query,
+  orderBy,
+  limit
+} from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
 
-let player,               // {x,y,w,h,speed}
-    enemies = [],        // array of enemy objects
-    score = 0,
-    startTime = 0,
-    lastSpawn = 0,
-    running = false,
-    anim,
-    playerName = '';      // will be filled after prompt
+/* ---- COPY‑PASTE YOUR OWN CONFIG FROM THE Firebase CONSOLE ---- */
+const firebaseConfig = {
+  apiKey:           "YOUR_API_KEY",
+  authDomain:       "YOUR_PROJECT_ID.firebaseapp.com",
+  projectId:        "YOUR_PROJECT_ID",
+  storageBucket:    "YOUR_PROJECT_ID.appspot.com",
+  messagingSenderId:"YOUR_SENDER_ID",
+  appId:            "YOUR_APP_ID"
+};
+/* ------------------------------------------------------------ */
 
-/* joystick for mobile (unchanged) */
-const joystick = {active:false,baseX:0,baseY:0,dx:0,dy:0,max:60};
+const app = initializeApp(firebaseConfig);
+const db  = getFirestore(app);
+const scoresCol = collection(db, "survivalScores");   // will be created automatically
 
-/* ==============================================================
-   PLAYER / NAME -------------------------------------------------
-   ============================================================== */
-function askForName(){
-  // First try to read a stored name – if the player already entered one before,
-  // we keep it so they don’t have to type it each session.
-  const stored = localStorage.getItem('survivalPlayerName');
-  if(stored){ playerName = stored; }
-  else{
-    // Ask with a simple prompt (you could replace this by a custom modal if you prefer)
-    let name = '';
-    while(!name){ name = prompt('Enter your name (this will appear on the leaderboard)'); }
-    playerName = name.trim();
-    localStorage.setItem('survivalPlayerName', playerName);
-  }
-  document.getElementById('playerName').textContent = playerName;
+/* --------------------------------------------------------------
+   FUNCTIONS THAT INTERACT WITH FIRESTORE
+   -------------------------------------------------------------- */
+async function pushScoreToLeaderboard(name, score){
+  // write the new score
+  await addDoc(scoresCol, {name, score, ts: Date.now()});
+  // after writing, refresh the UI
+  await updateLeaderboardUI();
 }
 
-/* ==============================================================
-   LEADERBOARD ---------------------------------------------------
-   ============================================================== */
-function loadLeaderboard(){
-  const raw = localStorage.getItem('survivalTop3');
-  return raw ? JSON.parse(raw) : [];   // array of {name,score}
+async function loadTop3(){
+  // query the 3 highest scores, ordered descending
+  const q = query(scoresCol, orderBy("score","desc"), limit(3));
+  const snap = await getDocs(q);
+  const list = [];
+  snap.forEach(doc=>{ const data = doc.data(); list.push({name:data.name, score:data.score}); });
+  return list;
 }
-function saveLeaderboard(arr){
-  localStorage.setItem('survivalTop3', JSON.stringify(arr));
-}
-function updateLeaderboardUI(){
+
+async function updateLeaderboardUI(){
   const topList = document.getElementById('topList');
-  topList.innerHTML = '';                     // clear current list
-  const board = loadLeaderboard();
+  topList.innerHTML = '';                         // clear
+  const board = await loadTop3();
   board.forEach(entry=>{
     const li = document.createElement('li');
     li.textContent = `${entry.name}: ${entry.score}s`;
@@ -117,36 +103,49 @@ function updateLeaderboardUI(){
   });
 }
 
-/* After every game‑over we insert the new score, keep only the best three */
-function pushScoreToLeaderboard(){
-  const board = loadLeaderboard();
-  board.push({name: playerName, score});
-  board.sort((a,b)=>b.score - a.score);   // descending
-  if(board.length>3) board.length = 3;    // keep only top‑3
-  saveLeaderboard(board);
-  updateLeaderboardUI();
+/* ====================== GAME CODE (unchanged except leaderboard calls) ====================== */
+const canvas = document.getElementById('game');
+const ctx    = canvas.getContext('2d');
+
+let player, enemies=[], score=0, startTime=0, lastSpawn=0, running=false, anim;
+let playerName = '';
+const joystick={active:false,baseX:0,baseY:0,dx:0,dy:0,max:60};
+
+/* ---------- PLAYER NAME ----------
+   ask once, store in localStorage for convenience */
+function askForName(){
+  const stored = localStorage.getItem('survivalPlayerName');
+  if(stored){ playerName = stored; }
+  else{
+    let name = '';
+    while(!name){ name = prompt('Enter your name (appears on the leaderboard)'); }
+    playerName = name.trim();
+    localStorage.setItem('survivalPlayerName', playerName);
+  }
+  document.getElementById('playerName').textContent = playerName;
 }
 
-/* ==============================================================
-   GAME SETUP ----------------------------------------------------
-   ============================================================== */
+/* ---------- RESET ----------
+   (player & enemies) */
 function reset(){
   player = {x:220, y:330, w:30, h:30, speed:4.5};
   enemies = [];
 }
 
-/* spawn an enemy from a random side */
+/* ---------- SPAWN ENEMY ----------
+   from a random side */
 function spawnEnemy(){
   const side = Math.floor(Math.random()*4);
-  let x, y;
-  if(side===0){ x=Math.random()*canvas.width; y=-30; }               // top
-  if(side===1){ x=canvas.width+30; y=Math.random()*canvas.height; }   // right
-  if(side===2){ x=Math.random()*canvas.width; y=canvas.height+30; }   // bottom
-  if(side===3){ x=-30; y=Math.random()*canvas.height; }               // left
-  enemies.push({x, y, w:24, h:24, s:1.6});
+  let x,y;
+  if(side===0){ x=Math.random()*canvas.width; y=-30; }
+  if(side===1){ x=canvas.width+30; y=Math.random()*canvas.height; }
+  if(side===2){ x=Math.random()*canvas.width; y=canvas.height+30; }
+  if(side===3){ x=-30; y=Math.random()*canvas.height; }
+  enemies.push({x,y,w:24,h:24,s:1.6});
 }
 
-/* move player according to joystick */
+/* ---------- PLAYER UPDATE ----------
+   joystick handling */
 function updatePlayer(){
   if(joystick.active){
     const mag = Math.hypot(joystick.dx, joystick.dy);
@@ -155,12 +154,12 @@ function updatePlayer(){
       player.y += (joystick.dy/mag) * player.speed;
     }
   }
-  // stay inside canvas
   player.x = Math.max(0, Math.min(canvas.width-player.w, player.x));
   player.y = Math.max(0, Math.min(canvas.height-player.h, player.y));
 }
 
-/* enemies chase the player */
+/* ---------- ENEMIES MOVE ----------
+   each enemy chases the player */
 function updateEnemies(){
   enemies.forEach(e=>{
     const dx = player.x - e.x,
@@ -171,34 +170,33 @@ function updateEnemies(){
   });
 }
 
-/* --------‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‐
-   ENEMY‑ENEMY COLLISION : when two red squares touch each other both disappear
-   --------------------------------------------------------------------------- */
+/* ---------- ENEMY‑ENEMY COLLISION ----------
+   remove both squares when they touch */
 function handleEnemyCollisions(){
-  const toRemove = new Set();               // indices that will be deleted
+  const toRemove = new Set();
   for(let i=0;i<enemies.length;i++){
     for(let j=i+1;j<enemies.length;j++){
-      const a = enemies[i], b = enemies[j];
+      const a=enemies[i], b=enemies[j];
       if(a.x < b.x+b.w && a.x+a.w > b.x &&
          a.y < b.y+b.h && a.y+a.h > b.y){
-        toRemove.add(i);
-        toRemove.add(j);
+        toRemove.add(i); toRemove.add(j);
       }
     }
   }
   enemies = enemies.filter((_,idx)=>!toRemove.has(idx));
 }
 
-/* player‑enemy collision ends the game */
+/* ---------- PLAYER‑ENEMY COLLISION ----------
+   ends the game */
 function collide(){
   return enemies.some(e=>
     player.x < e.x+e.w && player.x+player.w > e.x &&
     player.y < e.y+e.h && player.y+player.h > e.y);
 }
 
-/* --------------------------------------------------------------- DRAW --------------------------------------------------------------- */
+/* ---------- DRAW ----------
+   background, grid, player, enemies, joystick */
 function draw(){
-  // background + optional grid
   ctx.fillStyle='#4caf50';
   ctx.fillRect(0,0,canvas.width,canvas.height);
   ctx.strokeStyle='rgba(255,255,255,.08)';
@@ -208,23 +206,16 @@ function draw(){
   for(let y=0;y<canvas.height;y+=40){
     ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke();
   }
-
-  // player (gold square)
   ctx.fillStyle='gold';
   ctx.fillRect(player.x,player.y,player.w,player.h);
-
-  // enemies (red squares)
   ctx.fillStyle='#e53935';
   enemies.forEach(e=>ctx.fillRect(e.x,e.y,e.w,e.h));
-
-  // joystick visual aid (optional)
   if(joystick.active){
     ctx.beginPath();
     ctx.strokeStyle='rgba(255,255,255,.4)';
     ctx.lineWidth=3;
-    ctx.arc(joystick.baseX, joystick.baseY, 40,0,Math.PI*2);
+    ctx.arc(joystick.baseX,joystick.baseY,40,0,Math.PI*2);
     ctx.stroke();
-
     ctx.beginPath();
     ctx.fillStyle='rgba(255,255,255,.5)';
     ctx.arc(joystick.baseX+joystick.dx,
@@ -233,57 +224,43 @@ function draw(){
   }
 }
 
-/* --------------------------------------------------------------- MAIN LOOP --------------------------------------------------------------- */
+/* ---------- MAIN LOOP ----------
+   runs while `running===true` */
 function loop(timestamp){
   if(!running) return;
-
-  // update score display
   score = Math.floor((Date.now()-startTime)/1000);
   document.getElementById('score').textContent = score;
+  if(timestamp - lastSpawn > 1200){ spawnEnemy(); lastSpawn = timestamp; }
 
-  // spawn a new enemy every ~1.2 s
-  if(timestamp - lastSpawn > 1200){
-    spawnEnemy();
-    lastSpawn = timestamp;
-  }
-
-  // physics
   updatePlayer();
   updateEnemies();
-  handleEnemyCollisions();     // <‑‑ NEW LINE
-
-  // render
+  handleEnemyCollisions();   // <‑‑ removes colliding enemies
   draw();
 
-  // check for game‑over
   if(collide()){
     running = false;
     cancelAnimationFrame(anim);
     document.getElementById('final').textContent =
         'You survived '+score+' seconds';
     document.getElementById('overlay').style.display='flex';
-    pushScoreToLeaderboard();   // <‑‑ store the result
+    // ----> STORE THE RESULT IN THE CLOUD <----
+    pushScoreToLeaderboard(playerName, score);
     return;
   }
-
   anim = requestAnimationFrame(loop);
 }
 
-/* --------------------------------------------------------------- START / RESTART --------------------------------------------------------------- */
+/* ---------- START / RESTART ----------
+   also asks for the name the very first time */
 function startGame(){
-  // ask for name only the very first time (or reuse stored name)
-  if(!playerName) askForName();
-
+  if(!playerName) askForName();         // will read from localStorage if already stored
   document.getElementById('overlay').style.display='none';
-  score = 0;
-  startTime = Date.now();
-  lastSpawn = 0;
-  reset();
-  running = true;
-  requestAnimationFrame(loop);
+  score = 0; startTime = Date.now(); lastSpawn = 0;
+  reset(); running = true; requestAnimationFrame(loop);
 }
 
-/* --------------------------------------------------------------- JOYSTICK INPUT --------------------------------------------------------------- */
+/* ---------- JOYSTICK INPUT ----------
+   (touch / mouse) */
 function pos(e){
   const r = canvas.getBoundingClientRect();
   return {
@@ -293,7 +270,6 @@ function pos(e){
 }
 canvas.addEventListener('pointerdown',e=>{
   const p = pos(e);
-  // left half of the screen = joystick activation
   if(p.x < canvas.width/2){
     joystick.active = true;
     joystick.baseX = p.x; joystick.baseY = p.y;
@@ -306,16 +282,14 @@ canvas.addEventListener('pointermove',e=>{
   let dx = p.x - joystick.baseX,
       dy = p.y - joystick.baseY;
   const d = Math.hypot(dx,dy);
-  if(d > joystick.max){
-    dx = dx/d * joystick.max;
-    dy = dy/d * joystick.max;
-  }
+  if(d > joystick.max){ dx = dx/d * joystick.max; dy = dy/d * joystick.max; }
   joystick.dx = dx; joystick.dy = dy;
 });
 canvas.addEventListener('pointerup',()=>{ joystick.active=false; joystick.dx=0; joystick.dy=0; });
 canvas.addEventListener('pointercancel',()=>{ joystick.active=false; });
 
-/* --------------------------------------------------------------- RESPONSIVE CANVAS (keeps 480×700 aspect) --------------------------------------------------------------- */
+/* ---------- RESPONSIVE CANVAS ----------
+   keeps the 480×700 aspect ratio */
 function resize(){
   const maxW = Math.min(window.innerWidth,480);
   canvas.style.width  = maxW+'px';
@@ -324,20 +298,22 @@ function resize(){
 window.addEventListener('resize',resize);
 resize();
 
-/* --------------------------------------------------------------- INITIAL LOAD --------------------------------------------------------------- */
-window.addEventListener('load',()=>{
-  // try to load a stored player name (if the player never played before, this does nothing)
+/* ---------- PAGE LOAD ----------
+   show leaderboard immediately, then start the first game */
+window.addEventListener('load',async()=>{
+  // load stored name (if any) – this is only for convenience, not required for the leaderboard
   const stored = localStorage.getItem('survivalPlayerName');
   if(stored){ playerName = stored; document.getElementById('playerName').textContent = playerName; }
 
-  // draw the current leaderboard (if any)
-  updateLeaderboardUI();
+  // show the current global top‑3 (reads from Firestore)
+  await updateLeaderboardUI();
 
-  // start the first game automatically
+  // start the first round
   startGame();
 });
 
-/* --------------------------------------------------------------- OPTIONAL SERVICE‑WORKER --------------------------------------------------------------- */
+/* ---------- OPTIONAL SERVICE‑WORKER ----------
+   (same as before, keep if you want offline caching) */
 if('serviceWorker' in navigator){
   navigator.serviceWorker.register('sw.js')
     .catch(e=>console.warn('SW registration failed',e));
