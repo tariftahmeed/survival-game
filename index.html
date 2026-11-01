@@ -299,14 +299,6 @@ function startGame(){
 }
 
 
-/* ---- START / RESTART ---- */
-function startGame(){
-  if(!playerName) askForName();        // prompt only once per device
-  document.getElementById('overlay').style.display = 'none';
-  score = 0; startTime = Date.now(); lastSpawn = 0;
-  reset(); running = true; requestAnimationFrame(loop);
-}
-
 /* ---- JOYSTICK INPUT (touch / mouse) ---- */
 function pos(e){
   const r = canvas.getBoundingClientRect();
