@@ -269,12 +269,14 @@ function pos(e){
     y: (e.clientY - r.top)  * canvas.height/ r.height
   };
 }
-canvas.addEventListener('pointerdown',e=>{
+canvas.addEventListener('pointerdown', e => {
   const p = pos(e);
-  if(p.x < canvas.width/2){
-    joystick.active = true;
-    joystick.baseX = p.x; joystick.baseY = p.y; joystick.dx = joystick.dy = 0;
-  }
+
+  joystick.active = true;
+  joystick.baseX = p.x;
+  joystick.baseY = p.y;
+  joystick.dx = 0;
+  joystick.dy = 0;
 });
 canvas.addEventListener('pointermove',e=>{
   if(!joystick.active) return;
