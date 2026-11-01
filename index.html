@@ -103,6 +103,7 @@ const canvas = document.getElementById('game');
 const ctx    = canvas.getContext('2d');
 
 let player, enemies=[], score=0, startTime=0, lastSpawn=0, running=false, anim;
+let pausedAt = 0;
 let playerName = '';
 const joystick={active:false,baseX:0,baseY:0,dx:0,dy:0,max:60};
 
@@ -248,17 +249,55 @@ function loop(timestamp){
   document.getElementById('score').textContent = score;
   if(timestamp - lastSpawn > 1200){ spawnEnemy(); lastSpawn = timestamp; }
   updatePlayer(); updateEnemies(); handleEnemyCollisions(); draw();
+
   if(collide()){
     running = false;
     cancelAnimationFrame(anim);
     document.getElementById('final').textContent = `You survived ${score} seconds`;
     document.getElementById('overlay').style.display = 'flex';
-    // ----> RECORD THE RESULT GLOBALLY <----
     pushScore(playerName, score);
     return;
   }
+
   anim = requestAnimationFrame(loop);
 }
+
+
+/* ---- PAUSE TIMER WHEN TAB/APP IS HIDDEN ---- */
+document.addEventListener('visibilitychange', () => {
+
+  if(document.hidden){
+    if(running){
+      pausedAt = Date.now();
+    }
+  } else {
+    if(running && pausedAt){
+      const pausedDuration = Date.now() - pausedAt;
+
+      startTime += pausedDuration;
+
+      pausedAt = 0;
+    }
+  }
+
+});
+
+
+/* ---- START / RESTART ---- */
+function startGame(){
+  if(!playerName) askForName();
+  document.getElementById('overlay').style.display = 'none';
+
+  score = 0;
+  startTime = Date.now();
+  lastSpawn = 0;
+  pausedAt = 0;
+
+  reset();
+  running = true;
+  requestAnimationFrame(loop);
+}
+
 
 /* ---- START / RESTART ---- */
 function startGame(){
