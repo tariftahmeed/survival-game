@@ -17,9 +17,9 @@ canvas{
   background:#4caf50;
   border:2px solid #222;
   touch-action:none;
-  width:min(100vw, 540px);
-  height:auto;
-  margin-top:4px;
+  flex:1;
+  max-width:100%;
+  margin-top:4px
 }
 #overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;justify-content:center;align-items:center;flex-direction:column;color:#fff;text-align:center}
 button{padding:12px 22px;font-size:18px;cursor:pointer}
@@ -296,6 +296,14 @@ canvas.addEventListener('pointermove',e=>{
 });
 canvas.addEventListener('pointerup',()=>{ joystick.active=false; joystick.dx=0; joystick.dy=0; });
 canvas.addEventListener('pointercancel',()=>{ joystick.active=
+/* ---- KEEP CANVAS ASPECT RATIO ---- */
+function resize(){
+  const maxW = Math.min(window.innerWidth, 540);
+  canvas.style.width = maxW + 'px';
+  canvas.style.height = (maxW * 1170 / 540) + 'px';
+}
+window.addEventListener('resize', resize);
+resize();
 
 /* ---- PAGE LOAD ----
    * Show stored player name (so the prompt isn’t shown repeatedly)
