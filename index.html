@@ -295,7 +295,7 @@ canvas.addEventListener('pointermove',e=>{
   joystick.dx = dx; joystick.dy = dy;
 });
 canvas.addEventListener('pointerup',()=>{ joystick.active=false; joystick.dx=0; joystick.dy=0; });
-canvas.addEventListener('pointercancel',()=>{ joystick.active=
+canvas.addEventListener('pointercancel',()=>{ joystick.active=false; });
 /* ---- KEEP CANVAS ASPECT RATIO ---- */
 function resize(){
   const maxW = Math.min(window.innerWidth, 540);
