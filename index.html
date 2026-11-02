@@ -173,42 +173,45 @@ function collide(){
 
 /* ---- DRAW ---- */
 function draw(){
+  // background
   ctx.fillStyle = '#4caf50';
   ctx.fillRect(0,0,canvas.width,canvas.height);
 
+  // faint grid (optional, kept from the original)
   ctx.strokeStyle = 'rgba(255,255,255,.08)';
-  for(let x=0;x<canvas.width;x+=40){
+  for(let x=0; x<canvas.width; x+=40){
     ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke();
   }
-  for(let y=0;y<canvas.height;y+=40){
+  for(let y=0; y<canvas.height; y+=40){
     ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke();
   }
 
-  // player (draw as a circle for a nicer look)
-  ctx.fillStyle = 'gold';
-  ctx.beginPath();
-  ctx.arc(player.x+player.w/2, player.y+player.h/2, player.w/2, 0, Math.PI*2);
-  ctx.fill();
+  /* ---------- PLAYER (emoji) ---------- */
+  ctx.font = '30px Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#fff';                     // white emoji on dark background
+  ctx.fillText('🧿', player.x + player.w/2, player.y + player.h/2);
 
-  // enemies (draw as red circles)
-  ctx.fillStyle = '#e53935';
+  /* ---------- ENEMIES (emoji) ---------- */
+  ctx.font = '28px Arial';
   enemies.forEach(e=>{
-    ctx.beginPath();
-    ctx.arc(e.x+e.w/2, e.y+e.h/2, e.w/2, 0, Math.PI*2);
-    ctx.fill();
+    ctx.fillText('👾', e.x + e.w/2, e.y + e.h/2);
   });
 
-  // joystick visual aid
+  /* ---------- JOYSTICK (visual aid) ---------- */
   if(joystick.active){
     ctx.beginPath();
-    ctx.strokeStyle='rgba(255,255,255,.4)';
-    ctx.lineWidth=3;
+    ctx.strokeStyle = 'rgba(255,255,255,.4)';
+    ctx.lineWidth = 3;
     ctx.arc(joystick.baseX, joystick.baseY, 40, 0, Math.PI*2);
     ctx.stroke();
 
     ctx.beginPath();
-    ctx.fillStyle='rgba(255,255,255,.5)';
-    ctx.arc(joystick.baseX+joystick.dx, joystick.baseY+joystick.dy, 20, 0, Math.PI*2);
+    ctx.fillStyle = 'rgba(255,255,255,.5)';
+    ctx.arc(joystick.baseX + joystick.dx,
+            joystick.baseY + joystick.dy,
+            20, 0, Math.PI*2);
     ctx.fill();
   }
 }
