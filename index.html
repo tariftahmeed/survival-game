@@ -6,7 +6,7 @@
       content="width=device-width,initial-scale=0.9,maximum-scale=0.9,user-scalable=no,viewport-fit=cover">
 <title>Hungry Reds</title>
 <style>
-/* (your existing CSS – keep it exactly as you had it) */
+/* (keep all your existing CSS – unchanged) */
 html,body{margin:0;height:100%;overflow:hidden;background:#111;font-family:Arial,sans-serif}
 body{display:flex;flex-direction:column;align-items:center}
 header{width:100%;background:#223;color:#fff;text-align:center;padding:10px;font-size:20px;position:relative}
@@ -29,7 +29,7 @@ button{padding:12px 22px;font-size:18px;cursor:pointer}
 <body>
 <header>
   🎮 Survival – <span id="playerLabel">Player: <strong id="playerName"></strong></span>
-  &nbsp;|&nbsp;Score: <span id="score">0</span>
+  &nbsp;|&nbsp;Score: <span id="score">0</span>   <!-- now shows kills -->
 </header>
 
 <div id="leaderboard">
@@ -43,7 +43,6 @@ button{padding:12px 22px;font-size:18px;cursor:pointer}
 
 <!-- ====================== FIREBASE & FIRESTORE ====================== -->
 <script type="module">
-/* ---------- IMPORT THE SDK (v10.7) ---------- */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js";
 import {
   getFirestore,
@@ -55,45 +54,40 @@ import {
   limit
 } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
 
-/* ---------- YOUR FIREBASE CONFIG (copy‑paste from step 3) ---------- */
-  const firebaseConfig = {
-    apiKey: "AIzaSyA6QM9EX21aAG8fmlcv4_z5ZtvNblha-KM",
-    authDomain: "survival-global-lb.firebaseapp.com",
-    projectId: "survival-global-lb",
-    storageBucket: "survival-global-lb.firebasestorage.app",
-    messagingSenderId: "348885828075",
-    appId: "1:348885828075:web:66ba19f95cb9347deb99ae"
-  };
+/* ---------- YOUR FIREBASE CONFIG ---------- */
+const firebaseConfig = {
+  apiKey:           "AIzaSyA6QM9EX21aAG8fmlcv4_z5ZtvNblha-KM",
+  authDomain:       "survival-global-lb.firebaseapp.com",
+  projectId:        "survival-global-lb",
+  storageBucket:    "survival-global-lb.firebasestorage.app",
+  messagingSenderId:"348885828075",
+  appId:            "1:348885828075:web:66ba19f95cb9347deb99ae"
+};
 
-/* ---------- INITIALISE FIREBASE & GET Firestore ---------- */
-const app = initializeApp(firebaseConfig);
-const db  = getFirestore(app);
-const scoresCol = collection(db, "survivalScores");   // will be created automatically on first write
+/* ---------- INITIALISE FIREBASE & FIRESTORE ---------- */
+const app   = initializeApp(firebaseConfig);
+const db    = getFirestore(app);
+const scoresCol = collection(db, "survivalScores");
 
 /* ---------- LEADERBOARD HELPERS ---------- */
-// Write a new (name,score) entry
-async function pushScore(name, score){
-  await addDoc(scoresCol,{name, score, ts: Date.now()});
-  await refreshLeaderboard();          // refresh the UI right after we write
+async function pushScore(name, kills){
+  await addDoc(scoresCol,{name, score:kills, ts: Date.now()});
+  await refreshLeaderboard();
 }
-
-// Get the 3 highest scores (global)
 async function fetchTop3(){
-  const q = query(scoresCol, orderBy("score","desc"), limit(3));
+  const q    = query(scoresCol, orderBy("score","desc"), limit(3));
   const snap = await getDocs(q);
   const list = [];
   snap.forEach(doc=>{ const d = doc.data(); list.push({name:d.name, score:d.score}); });
   return list;
 }
-
-// Render the top‑3 in the corner of the page
 async function refreshLeaderboard(){
-  const top = await fetchTop3();
-  const ol = document.getElementById('topList');
+  const top   = await fetchTop3();
+  const ol    = document.getElementById('topList');
   ol.innerHTML = "";
   top.forEach(entry=>{
     const li = document.createElement('li');
-    li.textContent = `${entry.name}: ${entry.score}s`;
+    li.textContent = `${entry.name}: ${entry.score}`;   // no “s” suffix – it's kills
     ol.appendChild(li);
   });
 }
@@ -102,12 +96,11 @@ async function refreshLeaderboard(){
 const canvas = document.getElementById('game');
 const ctx    = canvas.getContext('2d');
 
-let player, enemies=[], score=0, startTime=0, lastSpawn=0, running=false, anim;
-let pausedAt = 0;
+let player, enemies = [], kills = 0, lastSpawn = 0, running = false, anim;
 let playerName = '';
-const joystick={active:false,baseX:0,baseY:0,dx:0,dy:0,max:60};
+const joystick = {active:false, baseX:0, baseY:0, dx:0, dy:0, max:60};
 
-/* ---- PLAYER NAME (kept locally for convenience) ---- */
+/* ---- PLAYER NAME (local storage for convenience) ---- */
 function askForName(){
   const stored = localStorage.getItem('survivalPlayerName');
   if(stored){ playerName = stored; }
@@ -121,7 +114,7 @@ function askForName(){
 }
 
 /* ---- BASIC GAME SETUP ---- */
-function reset(){ player={x:220,y:330,w:30,h:30,speed:4.5}; enemies=[]; }
+function reset(){ player={x:220, y:330, w:30, h:30, speed:4.5}; enemies=[]; kills = 0; }
 function spawnEnemy(){
   const side = Math.floor(Math.random()*4);
   let x,y;
@@ -151,19 +144,27 @@ function updateEnemies(){
     e.y += (dy/d) * e.s;
   });
 }
+
+/* ---- ENEMY‑ENEMY COLLISION: increase kills and remove them ---- */
 function handleEnemyCollisions(){
-  const toRemove = new Set();
+  const toRemove = new Set();               // indices that will be deleted
   for(let i=0;i<enemies.length;i++){
     for(let j=i+1;j<enemies.length;j++){
-      const a=enemies[i], b=enemies[j];
+      const a = enemies[i], b = enemies[j];
       if(a.x < b.x+b.w && a.x+a.w > b.x &&
          a.y < b.y+b.h && a.y+a.h > b.y){
-        toRemove.add(i); toRemove.add(j);
+        toRemove.add(i);
+        toRemove.add(j);
       }
     }
   }
+  // Every *pair* of enemies that collided counts as ONE kill.
+  // The Set contains two indices per pair → kills = size/2
+  kills += Math.floor(toRemove.size / 2);
   enemies = enemies.filter((_,idx)=>!toRemove.has(idx));
 }
+
+/* ---- PLAYER‑ENEMY COLLISION (game over) ---- */
 function collide(){
   return enemies.some(e=>
     player.x < e.x+e.w && player.x+player.w > e.x &&
@@ -172,132 +173,82 @@ function collide(){
 
 /* ---- DRAW ---- */
 function draw(){
-  ctx.fillStyle='#4caf50';
+  ctx.fillStyle = '#4caf50';
   ctx.fillRect(0,0,canvas.width,canvas.height);
 
-  ctx.strokeStyle='rgba(255,255,255,.08)';
-
+  ctx.strokeStyle = 'rgba(255,255,255,.08)';
   for(let x=0;x<canvas.width;x+=40){
-    ctx.beginPath();
-    ctx.moveTo(x,0);
-    ctx.lineTo(x,canvas.height);
-    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke();
   }
-
   for(let y=0;y<canvas.height;y+=40){
-    ctx.beginPath();
-    ctx.moveTo(0,y);
-    ctx.lineTo(canvas.width,y);
-    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke();
   }
 
- // Player
-ctx.font='30px Arial';
-ctx.textAlign='center';
-ctx.textBaseline='middle';
+  // player (draw as a circle for a nicer look)
+  ctx.fillStyle = 'gold';
+  ctx.beginPath();
+  ctx.arc(player.x+player.w/2, player.y+player.h/2, player.w/2, 0, Math.PI*2);
+  ctx.fill();
 
-ctx.fillText(
-  '🧿',
-  player.x + player.w / 2,
-  player.y + player.h / 2
-);
+  // enemies (draw as red circles)
+  ctx.fillStyle = '#e53935';
+  enemies.forEach(e=>{
+    ctx.beginPath();
+    ctx.arc(e.x+e.w/2, e.y+e.h/2, e.w/2, 0, Math.PI*2);
+    ctx.fill();
+  });
 
-// Enemies
-ctx.font='28px Arial';
-
-enemies.forEach(e => {
-  ctx.fillText(
-    '👾',
-    e.x + e.w / 2,
-    e.y + e.h / 2
-  );
-});
-
-
-  // Mobile joystick
+  // joystick visual aid
   if(joystick.active){
     ctx.beginPath();
     ctx.strokeStyle='rgba(255,255,255,.4)';
     ctx.lineWidth=3;
-    ctx.arc(
-      joystick.baseX,
-      joystick.baseY,
-      40,
-      0,
-      Math.PI*2
-    );
+    ctx.arc(joystick.baseX, joystick.baseY, 40, 0, Math.PI*2);
     ctx.stroke();
 
     ctx.beginPath();
     ctx.fillStyle='rgba(255,255,255,.5)';
-    ctx.arc(
-      joystick.baseX + joystick.dx,
-      joystick.baseY + joystick.dy,
-      20,
-      0,
-      Math.PI*2
-    );
+    ctx.arc(joystick.baseX+joystick.dx, joystick.baseY+joystick.dy, 20, 0, Math.PI*2);
     ctx.fill();
   }
 }
 
-
 /* ---- MAIN LOOP ---- */
 function loop(timestamp){
   if(!running) return;
-  score = Math.floor((Date.now()-startTime)/1000);
-  document.getElementById('score').textContent = score;
-  if(timestamp - lastSpawn > 1200){ spawnEnemy(); lastSpawn = timestamp; }
-  updatePlayer(); updateEnemies(); handleEnemyCollisions(); draw();
 
+  // Show current kill count
+  document.getElementById('score').textContent = kills;
+
+  // spawn a new enemy roughly every 1.2 s
+  if(timestamp - lastSpawn > 1200){ spawnEnemy(); lastSpawn = timestamp; }
+
+  updatePlayer();
+  updateEnemies();
+  handleEnemyCollisions();   // <‑‑ this now adds to the kill counter
+  draw();
+
+  // check for player‑enemy collision → game over
   if(collide()){
     running = false;
     cancelAnimationFrame(anim);
-    document.getElementById('final').textContent = `You survived ${score} seconds`;
+    document.getElementById('final').textContent = `You eliminated ${kills} enemies`;
     document.getElementById('overlay').style.display = 'flex';
-    pushScore(playerName, score);
+    pushScore(playerName, kills);
     return;
   }
 
   anim = requestAnimationFrame(loop);
 }
 
-
-/* ---- PAUSE TIMER WHEN TAB/APP IS HIDDEN ---- */
-document.addEventListener('visibilitychange', () => {
-
-  if(document.hidden){
-    if(running){
-      pausedAt = Date.now();
-    }
-  } else {
-    if(running && pausedAt){
-      const pausedDuration = Date.now() - pausedAt;
-
-      startTime += pausedDuration;
-
-      pausedAt = 0;
-    }
-  }
-
-});
-
-
 /* ---- START / RESTART ---- */
 function startGame(){
   if(!playerName) askForName();
   document.getElementById('overlay').style.display = 'none';
-
-  score = 0;
-  startTime = Date.now();
-  lastSpawn = 0;
-  pausedAt = 0;
-
-  reset();
+  reset();                // also zeros kills
   running = true;
   requestAnimationFrame(loop);
 }
-
 
 /* ---- JOYSTICK INPUT (touch / mouse) ---- */
 function pos(e){
@@ -307,16 +258,13 @@ function pos(e){
     y: (e.clientY - r.top)  * canvas.height/ r.height
   };
 }
-canvas.addEventListener('pointerdown', e => {
+canvas.addEventListener('pointerdown', e=>{
   const p = pos(e);
-
   joystick.active = true;
-  joystick.baseX = p.x;
-  joystick.baseY = p.y;
-  joystick.dx = 0;
-  joystick.dy = 0;
+  joystick.baseX = p.x; joystick.baseY = p.y;
+  joystick.dx = joystick.dy = 0;
 });
-canvas.addEventListener('pointermove',e=>{
+canvas.addEventListener('pointermove', e=>{
   if(!joystick.active) return;
   const p = pos(e);
   let dx = p.x - joystick.baseX,
@@ -327,25 +275,24 @@ canvas.addEventListener('pointermove',e=>{
 });
 canvas.addEventListener('pointerup',()=>{ joystick.active=false; joystick.dx=0; joystick.dy=0; });
 canvas.addEventListener('pointercancel',()=>{ joystick.active=false; });
+
 /* ---- KEEP CANVAS ASPECT RATIO ---- */
 function resize(){
-  const maxW = Math.min(window.innerWidth, 540);
-  canvas.style.width = maxW + 'px';
-  canvas.style.height = (maxW * 1170 / 540) + 'px';
+  const maxW = Math.min(window.innerWidth,540);
+  canvas.style.width  = maxW+'px';
+  canvas.style.height = (maxW * 1170 / 540)+'px';
 }
 window.addEventListener('resize', resize);
 resize();
 
 /* ---- PAGE LOAD ----
-   * Show stored player name (so the prompt isn’t shown repeatedly)
-   * Load the **global** top‑3 from Firestore
-   * Start the first round automatically
+   * show stored name, load global leaderboard, then start the first game
    ------------------------------------------------------- */
-window.addEventListener('load',async()=>{
+window.addEventListener('load', async ()=>{
   const stored = localStorage.getItem('survivalPlayerName');
   if(stored){ playerName = stored; document.getElementById('playerName').textContent = playerName; }
-  await refreshLeaderboard();    // pulls the *global* list from Firestore
-  startGame();                   // auto‑start the first game
+  await refreshLeaderboard();   // global top‑3 (kills)
+  startGame();                  // auto‑start
 });
 
 /* ---- OPTIONAL SERVICE‑WORKER (offline caching) ---- */
@@ -353,7 +300,8 @@ if('serviceWorker' in navigator){
   navigator.serviceWorker.register('sw.js')
     .catch(e=>console.warn('SW registration failed',e));
 }
-/* ---------- MODERN LISTENER FOR THE “Play Again” BUTTON ---------- */
+
+/* ---- MODERN LISTENER FOR THE “Play Again” BUTTON ---- */
 document.getElementById('retry').addEventListener('click', startGame);
 </script>
 </body>
