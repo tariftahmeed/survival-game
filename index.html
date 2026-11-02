@@ -100,6 +100,32 @@ let player, enemies = [], kills = 0, lastSpawn = 0, running = false, anim;
 let playerName = '';
 const joystick = {active:false, baseX:0, baseY:0, dx:0, dy:0, max:60};
 
+/* ==== 1️⃣ ROOMS DEFINITION ==== */
+const rooms = {
+  world: {
+    name: "World",
+    bg: "#4caf50",
+    doors: [
+      {x:30,  y:540, w:80, h:80, target:"buildingA"},
+      {x:380, y:20,  w:80, h:80, target:"buildingB"}
+    ],
+    spawnEnemy(){ spawnEnemy(); }
+  },
+  buildingA: {
+    name: "Building A",
+    bg: "#8b4513",
+    doors: [{x:200, y:1060, w:80, h:80, target:"world"}],
+    spawnEnemy(){ spawnEnemy(); }
+  },
+  buildingB: {
+    name: "Building B",
+    bg: "#3b5998",
+    doors: [{x:200, y:20, w:80, h:80, target:"world"}],
+    spawnEnemy(){ spawnEnemy(); }
+  }
+};
+let currentRoom = rooms.world;
+      
 /* ---- PLAYER NAME (local storage for convenience) ---- */
 function askForName(){
   const stored = localStorage.getItem('survivalPlayerName');
@@ -171,67 +197,75 @@ function collide(){
     player.y < e.y+e.h && player.y+player.h > e.y);
 }
 
-/* ---- DRAW ---- */
-function draw(){
-  // background
-  ctx.fillStyle = '#4caf50';
-  ctx.fillRect(0,0,canvas.width,canvas.height);
-
-  // faint grid (optional, kept from the original)
-  ctx.strokeStyle = 'rgba(255,255,255,.08)';
-  for(let x=0; x<canvas.width; x+=40){
-    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke();
-  }
-  for(let y=0; y<canvas.height; y+=40){
-    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke();
-  }
-
-  /* ---------- PLAYER (emoji) ---------- */
-  ctx.font = '30px Arial';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#fff';                     // white emoji on dark background
-  ctx.fillText('🧿', player.x + player.w/2, player.y + player.h/2);
-
-  /* ---------- ENEMIES (emoji) ---------- */
-  ctx.font = '28px Arial';
-  enemies.forEach(e=>{
-    ctx.fillText('👾', e.x + e.w/2, e.y + e.h/2);
-  });
-
-  /* ---------- JOYSTICK (visual aid) ---------- */
-  if(joystick.active){
-    ctx.beginPath();
-    ctx.strokeStyle = 'rgba(255,255,255,.4)';
-    ctx.lineWidth = 3;
-    ctx.arc(joystick.baseX, joystick.baseY, 40, 0, Math.PI*2);
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.fillStyle = 'rgba(255,255,255,.5)';
-    ctx.arc(joystick.baseX + joystick.dx,
-            joystick.baseY + joystick.dy,
-            20, 0, Math.PI*2);
-    ctx.fill();
+/* ==== 2️⃣ DOOR / ROOM SWITCHING ==== */
+function checkDoorCollision(){
+  for (const d of currentRoom.doors){
+    const inside = (
+      player.x < d.x+d.w && player.x+player.w > d.x &&
+      player.y < d.y+d.h && player.y+player.h > d.y
+    );
+    if (inside){
+      const targetRoom = rooms[d.target];
+      if (!targetRoom) { console.warn('No such room:', d.target); return; }
+      player.x = canvas.width/2 - player.w/2;
+      player.y = canvas.height/2 - player.h/2;
+      enemies = [];
+      currentRoom = targetRoom;
+      lastSpawn = 0;
+      return;
+    }
   }
 }
 
-/* ---- MAIN LOOP ---- */
+      
+/* ==== 3️⃣ DRAW (background + doors) ==== */
+function draw(){
+  // background of the active room
+  ctx.fillStyle = currentRoom.bg;
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  // optional grid (same as before)
+  ctx.strokeStyle='rgba(255,255,255,.08)';
+  for(let x=0;x<canvas.width;x+=40){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke(); }
+  for(let y=0;y<canvas.height;y+=40){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke(); }
+
+  // draw doors (transparent blue rectangles)
+  ctx.fillStyle='rgba(0,0,255,.3)';
+  currentRoom.doors.forEach(d=>{ ctx.fillRect(d.x,d.y,d.w,d.h);
+    ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.strokeRect(d.x,d.y,d.w,d.h);
+  });
+
+  // player emoji
+  ctx.font='30px Arial'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillStyle='#fff';
+  ctx.fillText('🧿', player.x+player.w/2, player.y+player.h/2);
+
+  // enemies emoji
+  ctx.font='28px Arial';
+  enemies.forEach(e=>{ ctx.fillText('👾', e.x+e.w/2, e.y+e.h/2); });
+
+  // joystick visual aid (unchanged)
+  if(joystick.active){
+    ctx.beginPath(); ctx.strokeStyle='rgba(255,255,255,.4)'; ctx.lineWidth=3;
+    ctx.arc(joystick.baseX,joystick.baseY,40,0,Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.fillStyle='rgba(255,255,255,.5)';
+    ctx.arc(joystick.baseX+joystick.dx, joystick.baseY+joystick.dy,20,0,Math.PI*2);
+    ctx.fill();
+  }
+}
+/* ==== 4️⃣ MAIN LOOP (call door check) ==== */
 function loop(timestamp){
   if(!running) return;
-
-  // Show current kill count
   document.getElementById('score').textContent = kills;
 
-  // spawn a new enemy roughly every 1.2 s
-  if(timestamp - lastSpawn > 1200){ spawnEnemy(); lastSpawn = timestamp; }
+  if(timestamp - lastSpawn > 1200){ currentRoom.spawnEnemy(); lastSpawn = timestamp; }
 
   updatePlayer();
   updateEnemies();
-  handleEnemyCollisions();   // <‑‑ this now adds to the kill counter
+  handleEnemyCollisions();
+  checkDoorCollision();        // <-- NEW
   draw();
 
-  // check for player‑enemy collision → game over
   if(collide()){
     running = false;
     cancelAnimationFrame(anim);
@@ -240,15 +274,14 @@ function loop(timestamp){
     pushScore(playerName, kills);
     return;
   }
-
   anim = requestAnimationFrame(loop);
 }
 
-/* ---- START / RESTART ---- */
+/* ==== START / RESTART ==== */
 function startGame(){
   if(!playerName) askForName();
   document.getElementById('overlay').style.display = 'none';
-  reset();                // also zeros kills
+  reset();
   running = true;
   requestAnimationFrame(loop);
 }
@@ -288,14 +321,12 @@ function resize(){
 window.addEventListener('resize', resize);
 resize();
 
-/* ---- PAGE LOAD ----
-   * show stored name, load global leaderboard, then start the first game
-   ------------------------------------------------------- */
+/* ==== PAGE LOAD ==== */
 window.addEventListener('load', async ()=>{
   const stored = localStorage.getItem('survivalPlayerName');
   if(stored){ playerName = stored; document.getElementById('playerName').textContent = playerName; }
-  await refreshLeaderboard();   // global top‑3 (kills)
-  startGame();                  // auto‑start
+  await refreshLeaderboard();
+  startGame();
 });
 
 /* ---- OPTIONAL SERVICE‑WORKER (offline caching) ---- */
