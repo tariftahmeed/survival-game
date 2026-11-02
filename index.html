@@ -121,7 +121,18 @@ const rooms = {
       // back to world
       {x:200, y:1060, w:80, h:80, target:"world", emoji:"🔙"}   // "back" arrow emoji (optional)
     ],
-    spawnEnemy(){ spawnEnemy(); }
+    spawnEnemy(){},
+        
+    // LIST OF INTERIOR EMOJIS (tables, chairs, bed)
+    decor: [
+      // two chairs (🪑) placed side‑by‑side
+      {x:150, y:300, emoji:"🪑"},
+      {x:230, y:300, emoji:"🪑"},
+      // a simple “table” – we’ll use a plate emoji as a surrogate
+      {x:190, y:370, emoji:"🍽️"},
+      // a bed (🛏️)
+      {x:190, y:460, emoji:"🛏️"}
+    ]
   },
 
   buildingB: {
