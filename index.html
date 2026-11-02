@@ -337,7 +337,7 @@ function loop(timestamp){
   if(collide()){
     running = false;
     cancelAnimationFrame(anim);
-    document.getElementById('final').textContent = `You scored ${kills}. You need at least 10 to exit the building.`;
+    document.getElementById('final').textContent = `You scored ${kills}. \\Hint: You need certain points to proceed in the game.`;
     document.getElementById('overlay').style.display = 'flex';
     pushScore(playerName, kills);
     return;
