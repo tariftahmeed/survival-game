@@ -119,7 +119,7 @@ const rooms = {
     bg: "#8b4513",
     doors: [
       // back to world
-      {x:200, y:860, w:80, h:80, target:"world", emoji:"🔙"}   // "back" arrow emoji (optional)
+      {x:200, y:860, w:80, h:80, target:"world", emoji:"🚪"}   // "back" arrow emoji (optional)
     ],
     spawnEnemy(){},
         
@@ -139,7 +139,7 @@ const rooms = {
     name: "Building B",
     bg: "#3b5998",
     doors: [
-      {x:200, y:20, w:80, h:80, target:"world", emoji:"🔑", requiredKills: 10}
+      {x:200, y:20, w:80, h:80, target:"world", emoji:"🚪", requiredKills: 10}
     ],
     spawnEnemy(){ spawnEnemy(); }
   }
@@ -337,7 +337,7 @@ function loop(timestamp){
   if(collide()){
     running = false;
     cancelAnimationFrame(anim);
-    document.getElementById('final').textContent = `You eliminated ${kills} enemies`;
+    document.getElementById('final').textContent = `You scored ${kills}. You need at least 10 to exit the building.`;
     document.getElementById('overlay').style.display = 'flex';
     pushScore(playerName, kills);
     return;
