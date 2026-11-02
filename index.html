@@ -100,30 +100,40 @@ let player, enemies = [], kills = 0, lastSpawn = 0, running = false, anim;
 let playerName = '';
 const joystick = {active:false, baseX:0, baseY:0, dx:0, dy:0, max:60};
 
-/* ==== 1️⃣ ROOMS DEFINITION ==== */
+/* ==== 1️⃣ ROOMS DEFINITION (with emoji for each door) ==== */
 const rooms = {
   world: {
     name: "World",
     bg: "#4caf50",
     doors: [
-      {x:30,  y:540, w:80, h:80, target:"buildingA"},
-      {x:380, y:20,  w:80, h:80, target:"buildingB"}
+      // world → Building A
+      {x:30, y:540, w:80, h:80, target:"buildingA", emoji:"🏠"},
+      // world → Building B
+      {x:380, y:20, w:80, h:80, target:"buildingB", emoji:"🏢"}
     ],
-      spawnEnemy(){}
+    spawnEnemy(){ /* empty – world stays peaceful */ }
   },
+
   buildingA: {
     name: "Building A",
     bg: "#8b4513",
-    doors: [{x:200, y:1060, w:80, h:80, target:"world"}],
+    doors: [
+      // back to world
+      {x:200, y:1060, w:80, h:80, target:"world", emoji:"🔙"}   // "back" arrow emoji (optional)
+    ],
     spawnEnemy(){ spawnEnemy(); }
   },
+
   buildingB: {
     name: "Building B",
     bg: "#3b5998",
-    doors: [{x:200, y:20, w:80, h:80, target:"world"}],
+    doors: [
+      {x:200, y:20, w:80, h:80, target:"world", emoji:"🔙"}
+    ],
     spawnEnemy(){ spawnEnemy(); }
   }
 };
+
 let currentRoom = rooms.world;
       
 /* ---- PLAYER NAME (local storage for convenience) ---- */
