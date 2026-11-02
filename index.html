@@ -119,7 +119,7 @@ const rooms = {
     bg: "#8b4513",
     doors: [
       // back to world
-      {x:200, y:1060, w:80, h:80, target:"world", emoji:"🔙"}   // "back" arrow emoji (optional)
+      {x:200, y:860, w:80, h:80, target:"world", emoji:"🔙"}   // "back" arrow emoji (optional)
     ],
     spawnEnemy(){},
         
@@ -139,7 +139,7 @@ const rooms = {
     name: "Building B",
     bg: "#3b5998",
     doors: [
-      {x:200, y:20, w:80, h:80, target:"world", emoji:"🔙"}
+      {x:200, y:20, w:80, h:80, target:"world", emoji:"🔑", requiredKills: 10}
     ],
     spawnEnemy(){ spawnEnemy(); }
   }
@@ -254,25 +254,22 @@ function draw(){
     ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke();
   }
 
- /* ---------- DOORS – DRAW THEM AS EMOJIS ---------- */
-  // make the emoji big enough to be easy to tap
-  ctx.font = '48px Arial';            // you can change the size if you like
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#fff';             // colour doesn’t matter for the emoji itself
+ /* ---------- DOORS (as emojis, with lock check) ---------- */
+ctx.font = '48px Arial';
+ctx.textAlign = 'center';
+ctx.textBaseline = 'middle';
+ctx.fillStyle = '#fff';
 
-  // loop over every door of the *active* room
-  currentRoom.doors.forEach(door => {
-    // Use the door‑specific emoji if it exists,
-    // otherwise fall back to a generic building symbol.
-    const emoji = door.emoji || '🏠';
+currentRoom.doors.forEach(d => {
+  // Show the door only if it has no lock OR the player already has enough kills
+  const unlocked = (!d.requiredKills) || (kills >= d.requiredKills);
+  if (!unlocked) return;          // skip drawing – door stays invisible
 
-    // The emoji is drawn *centered* inside the rectangle that defines the door.
-    ctx.fillText(emoji,
-                 door.x + door.w/2,   // x‑center of the door
-                 door.y + door.h/2);  // y‑center of the door
-  });
+  const emoji = d.emoji || '🏠';
+  ctx.fillText(emoji, d.x + d.w/2, d.y + d.h/2);
+});
 
+      
 /* ---------- ROOM‑SPECIFIC DECOR (tables, chairs, bed) ---------- */
   if (currentRoom.decor && currentRoom.decor.length){
     ctx.font = '36px Arial';            // a little smaller than doors
