@@ -254,7 +254,7 @@ function draw(){
     ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke();
   }
 
-  /* ---------- DOORS – DRAW THEM AS EMOJIS ---------- */
+ /* ---------- DOORS – DRAW THEM AS EMOJIS ---------- */
   // make the emoji big enough to be easy to tap
   ctx.font = '48px Arial';            // you can change the size if you like
   ctx.textAlign = 'center';
@@ -273,6 +273,19 @@ function draw(){
                  door.y + door.h/2);  // y‑center of the door
   });
 
+/* ---------- ROOM‑SPECIFIC DECOR (tables, chairs, bed) ---------- */
+  if (currentRoom.decor && currentRoom.decor.length){
+    ctx.font = '36px Arial';            // a little smaller than doors
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#fff';
+
+    currentRoom.decor.forEach(item => {
+      // `item.x` and `item.y` already represent the centre of the emoji
+      ctx.fillText(item.emoji, item.x, item.y);
+    });
+  }
+        
   /* ---------- PLAYER (still an emoji) ---------- */
   ctx.font = '30px Arial';
   ctx.textAlign = 'center';
