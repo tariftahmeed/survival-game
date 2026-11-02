@@ -230,36 +230,64 @@ function checkDoorCollision(){
       
 /* ==== 3️⃣ DRAW (background + doors) ==== */
 function draw(){
-  // background of the active room
+  /* ---------- BACKGROUND (room colour) ---------- */
   ctx.fillStyle = currentRoom.bg;
   ctx.fillRect(0,0,canvas.width,canvas.height);
 
-  // optional grid (same as before)
+  /* ---------- OPTIONAL GRID (unchanged) ---------- */
   ctx.strokeStyle='rgba(255,255,255,.08)';
-  for(let x=0;x<canvas.width;x+=40){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke(); }
-  for(let y=0;y<canvas.height;y+=40){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke(); }
+  for(let x=0;x<canvas.width;x+=40){
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke();
+  }
+  for(let y=0;y<canvas.height;y+=40){
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke();
+  }
 
-  // draw doors (transparent blue rectangles)
-  ctx.fillStyle='rgba(0,0,255,.3)';
-  currentRoom.doors.forEach(d=>{ ctx.fillRect(d.x,d.y,d.w,d.h);
-    ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.strokeRect(d.x,d.y,d.w,d.h);
+  /* ---------- DOORS – DRAW THEM AS EMOJIS ---------- */
+  // make the emoji big enough to be easy to tap
+  ctx.font = '48px Arial';            // you can change the size if you like
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#fff';             // colour doesn’t matter for the emoji itself
+
+  // loop over every door of the *active* room
+  currentRoom.doors.forEach(door => {
+    // Use the door‑specific emoji if it exists,
+    // otherwise fall back to a generic building symbol.
+    const emoji = door.emoji || '🏠';
+
+    // The emoji is drawn *centered* inside the rectangle that defines the door.
+    ctx.fillText(emoji,
+                 door.x + door.w/2,   // x‑center of the door
+                 door.y + door.h/2);  // y‑center of the door
   });
 
-  // player emoji
-  ctx.font='30px Arial'; ctx.textAlign='center'; ctx.textBaseline='middle';
-  ctx.fillStyle='#fff';
-  ctx.fillText('🧿', player.x+player.w/2, player.y+player.h/2);
+  /* ---------- PLAYER (still an emoji) ---------- */
+  ctx.font = '30px Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#fff';
+  ctx.fillText('🧿', player.x + player.w/2, player.y + player.h/2);
 
-  // enemies emoji
-  ctx.font='28px Arial';
-  enemies.forEach(e=>{ ctx.fillText('👾', e.x+e.w/2, e.y+e.h/2); });
+  /* ---------- ENEMIES (still emojis) ---------- */
+  ctx.font = '28px Arial';
+  enemies.forEach(e => {
+    ctx.fillText('👾', e.x + e.w/2, e.y + e.h/2);
+  });
 
-  // joystick visual aid (unchanged)
+  /* ---------- JOYSTICK (visual aid) ---------- */
   if(joystick.active){
-    ctx.beginPath(); ctx.strokeStyle='rgba(255,255,255,.4)'; ctx.lineWidth=3;
-    ctx.arc(joystick.baseX,joystick.baseY,40,0,Math.PI*2); ctx.stroke();
-    ctx.beginPath(); ctx.fillStyle='rgba(255,255,255,.5)';
-    ctx.arc(joystick.baseX+joystick.dx, joystick.baseY+joystick.dy,20,0,Math.PI*2);
+    ctx.beginPath();
+    ctx.strokeStyle='rgba(255,255,255,.4)';
+    ctx.lineWidth=3;
+    ctx.arc(joystick.baseX,joystick.baseY,40,0,Math.PI*2);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.fillStyle='rgba(255,255,255,.5)';
+    ctx.arc(joystick.baseX+joystick.dx,
+            joystick.baseY+joystick.dy,
+            20,0,Math.PI*2);
     ctx.fill();
   }
 }
