@@ -221,18 +221,27 @@ function collide(){
 /* ==== 2️⃣ DOOR / ROOM SWITCHING ==== */
 function checkDoorCollision(){
   for (const d of currentRoom.doors){
+    // Is this door unlocked for the current kill count?
+    const unlocked = (!d.requiredKills) || (kills >= d.requiredKills);
+    if (!unlocked) continue;   // ignore locked doors completely
+
     const inside = (
       player.x < d.x+d.w && player.x+player.w > d.x &&
       player.y < d.y+d.h && player.y+player.h > d.y
     );
     if (inside){
       const targetRoom = rooms[d.target];
-      if (!targetRoom) { console.warn('No such room:', d.target); return; }
+      if (!targetRoom){ console.warn('No such room:', d.target); return; }
+
+      // centre the player in the new room
       player.x = canvas.width/2 - player.w/2;
       player.y = canvas.height/2 - player.h/2;
+
+      // clear any leftover enemies and reset the spawn timer
       enemies = [];
-      currentRoom = targetRoom;
       lastSpawn = 0;
+
+      currentRoom = targetRoom;
       return;
     }
   }
