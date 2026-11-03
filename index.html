@@ -100,6 +100,7 @@ let player, enemies = [], kills = 0, lastSpawn = 0, running = false, anim;
 let playerName = '';
 const joystick = {active:false, baseX:0, baseY:0, dx:0, dy:0, max:60};
 let lastTime = 0;
+let buildingCAdded = false;
 
 /* ==== 1️⃣ ROOMS DEFINITION (with emoji for each door) ==== */
 const rooms = {
@@ -136,14 +137,33 @@ const rooms = {
     ]
   },
 
-  buildingB: {
+ buildingB: {
     name: "Building B",
     bg: "#3b5998",
     doors: [
       {x:200, y:20, w:80, h:80, target:"world", emoji:"🚪", lockedEmoji: "🔒", requiredKills: 10, showLock: true}
     ],
     spawnEnemy(){ spawnEnemy(); }
-  }
+  },
+
+buildingC: {
+  name: "Building C",
+  bg: "#aa5500",                     // a different colour so you can recognise it
+  doors: [
+    // back to the world
+    {x:200, y:860, w:80, h:80, target:"world", emoji:"🚪"}
+  ],
+  // you can give it its own enemies or leave it peaceful
+  spawnEnemy(){ /* optional – e.g. spawnEnemy(); */ },
+
+  // optional interior décor (just for fun)
+  decor: [
+    {x:190, y:300, emoji:"🪑"},
+    {x:270, y:300, emoji:"🪑"},
+    {x:230, y:380, emoji:"🛋️"},
+    {x:230, y:470, emoji:"🛏️"}
+  ]
+}
 };
 
 let currentRoom = rooms.world;
@@ -255,7 +275,6 @@ function collide(){
 /* ==== 2️⃣ DOOR / ROOM SWITCHING ==== */
 function checkDoorCollision(){
   for (const d of currentRoom.doors){
-    // Is this door unlocked for the current kill count?
     const unlocked = (!d.requiredKills) || (kills >= d.requiredKills);
     if (!unlocked) continue;   // ignore locked doors completely
 
@@ -276,9 +295,33 @@ function checkDoorCollision(){
       lastSpawn = 0;
 
       currentRoom = targetRoom;
+
+      // ---- NEW: if we just entered the world, maybe unlock Building C ----
+      if (currentRoom === rooms.world) {
+        maybeAddBuildingC();
+      }
+
       return;
     }
   }
+}
+
+/* ==== add BUILDING C ==== */
+function maybeAddBuildingC(){
+  // 1️⃣ Only run once
+  if (buildingCAdded) return;
+
+  // 2️⃣ Player must have at least 10 kills
+  if (kills < 10) return;
+
+  // 3️⃣ Add a new door to the *world* room
+  rooms.world.doors.push({
+    x:200, y:540, w:80, h:80,          // choose a free spot (doesn't overlap existing doors)
+    target:"buildingC",
+    emoji:"🏰"                         // a castle emoji – you can pick any you like
+  });
+
+  buildingCAdded = true;               // remember we already did it
 }
 
       
