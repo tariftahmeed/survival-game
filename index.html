@@ -193,23 +193,37 @@ function updateEnemies(){
   });
 }
 
-/* ---- ENEMY‑ENEMY COLLISION: increase kills and remove them ---- */
+/* ---- ENEMY‑ENEMY COLLISION: increase kills, remove them, and show a flash ---- */
 function handleEnemyCollisions(){
   const toRemove = new Set();               // indices that will be deleted
-  for(let i=0;i<enemies.length;i++){
-    for(let j=i+1;j<enemies.length;j++){
+
+  for (let i = 0; i < enemies.length; i++) {
+    for (let j = i + 1; j < enemies.length; j++) {
       const a = enemies[i], b = enemies[j];
-      if(a.x < b.x+b.w && a.x+a.w > b.x &&
-         a.y < b.y+b.h && a.y+a.h > b.y){
+
+      // AABB overlap test
+      if (a.x < b.x + b.w && a.x + a.w > b.x &&
+          a.y < b.y + b.h && a.y + a.h > b.y) {
+
+        // --- 1️⃣ Mark both enemies for removal ---
         toRemove.add(i);
         toRemove.add(j);
+
+        // --- 2️⃣ Create the visual “kill” effect ---
+        // midpoint of the two sprites (using their centres)
+        const midX = (a.x + b.x) / 2 + a.w / 2;
+        const midY = (a.y + b.y) / 2 + a.h / 2;
+        // ttl = 200 ms → the effect lives for about 0.2 s
+        killEffects.push({x: midX, y: midY, ttl: 200});
       }
     }
   }
+
   // Every *pair* of enemies that collided counts as ONE kill.
-  // The Set contains two indices per pair → kills = size/2
   kills += Math.floor(toRemove.size / 2);
-  enemies = enemies.filter((_,idx)=>!toRemove.has(idx));
+
+  // Remove the collided enemies
+  enemies = enemies.filter((_, idx) => !toRemove.has(idx));
 }
 
 /* --------- KILL‑EFFECT (flashing ⚔️) ---------- */
