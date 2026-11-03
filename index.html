@@ -148,21 +148,13 @@ const rooms = {
 
 buildingC: {
   name: "Building C",
-  bg: "#aa5500",                     // a different colour so you can recognise it
+  bg: "#f0ffff",                     // a different colour so you can recognise it
   doors: [
     // back to the world
-    {x:200, y:40, w:80, h:80, target:"world", emoji:"🚪"}
+    {x:200, y:40, w:860, h:80, target:"world", emoji:"🚪"}
   ],
   // you can give it its own enemies or leave it peaceful
   spawnEnemy(){ /* optional – e.g. spawnEnemy(); */ },
-
-  // optional interior décor (just for fun)
-  decor: [
-    {x:190, y:300, emoji:"🪑"},
-    {x:270, y:300, emoji:"🪑"},
-    {x:230, y:380, emoji:"🛋️"},
-    {x:230, y:470, emoji:"🛏️"}
-  ]
 }
 };
 
