@@ -139,7 +139,7 @@ const rooms = {
     name: "Building B",
     bg: "#3b5998",
     doors: [
-      {x:200, y:20, w:80, h:80, target:"world", emoji:"🚪", requiredKills: 10}
+      {x:200, y:20, w:80, h:80, target:"world", emoji:"🚪", lockedemoji: "🔒", requiredKills: 10, showLock: true}
     ],
     spawnEnemy(){ spawnEnemy(); }
   }
@@ -211,6 +211,25 @@ function handleEnemyCollisions(){
   enemies = enemies.filter((_,idx)=>!toRemove.has(idx));
 }
 
+/* --------- KILL‑EFFECT (flashing ⚔️) ---------- */
+let killEffects = []; // {x, y, ttl}
+function updateKillEffects(delta){
+  killEffects.forEach(e=> e.ttl -= delta);
+  killEffects = killEffects.filter(e=> e.ttl>0);
+}
+function drawKillEffects(){
+  ctx.font = '32px Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ff4444';
+  killEffects.forEach(e=>{
+    const opacity = Math.max(0, e.ttl/200);
+    ctx.globalAlpha = opacity;
+    ctx.fillText('⚔️', e.x, e.y);
+  });
+  ctx.globalAlpha = 1;
+}
+      
 /* ---- PLAYER‑ENEMY COLLISION (game over) ---- */
 function collide(){
   return enemies.some(e=>
@@ -271,11 +290,28 @@ ctx.fillStyle = '#fff';
 
 currentRoom.doors.forEach(d => {
   // Show the door only if it has no lock OR the player already has enough kills
-  const unlocked = (!d.requiredKills) || (kills >= d.requiredKills);
-  if (!unlocked) return;          // skip drawing – door stays invisible
-
-  const emoji = d.emoji || '🏠';
-  ctx.fillText(emoji, d.x + d.w/2, d.y + d.h/2);
+      const unlocked = (!d.requiredKills) || (kills >= d.requiredKills);
+      
+      // ----- UNLOCKED -------------------------------------------------
+      if (unlocked) {
+      const emoji = d.emoji || '🚪';
+      ctx.fillText(emoji, d.x + d.w/2, d.y + d.h/2);
+      return;            // nothing else for this door
+      }
+      
+      // ----- LOCKED ---------------------------------------------------
+      const lock = d.lockedEmoji || '🔒';
+      ctx.globalAlpha = 0.7;
+      ctx.fillText(lock, d.x + d.w/2, d.y + d.h/2);
+      ctx.globalAlpha = 1;
+      
+      if (d.showLock) {
+      ctx.font = '20px Arial';
+      ctx.fillStyle = '#ffcc00';
+      ctx.fillText(`${d.requiredKills}`, d.x + d.w/2, d.y + d.h + 14);
+      ctx.font = '48px Arial';
+      ctx.fillStyle = '#fff';
+      }
 });
 
       
@@ -323,7 +359,10 @@ currentRoom.doors.forEach(d => {
 }
 /* ==== 4️⃣ MAIN LOOP (call door check) ==== */
 function loop(timestamp){
-  if(!running) return;
+    if(!running) return;
+  const delta = timestamp - lastTime;
+  lastTime = timestamp;
+
   document.getElementById('score').textContent = kills;
 
   if(timestamp - lastSpawn > 1200){ currentRoom.spawnEnemy(); lastSpawn = timestamp; }
@@ -331,8 +370,10 @@ function loop(timestamp){
   updatePlayer();
   updateEnemies();
   handleEnemyCollisions();
-  checkDoorCollision();        // <-- NEW
+  updateKillEffects(delta);
+  checkDoorCollision();
   draw();
+  drawKillEffects();           // <-- new drawing pass
 
   if(collide()){
     running = false;
