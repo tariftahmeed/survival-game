@@ -94,7 +94,7 @@ let gamePaused = false;        // pause while dialogue is shown
 
 /* ---------- KING NPC (inside buildingC) ---------- */
 let king = {
-  x:50, y:50,
+  x:0, y:0,
   w:40, h:60,
   emoji:'🤴',
   dialogueLines:[
@@ -103,8 +103,10 @@ let king = {
     "Take this gift and continue your quest."
   ],
   currentLine:0,
-  active:false,
-  placed:false
+  /* NEW --------------------------------------------------- */
+  active:false,          // true while the UI is open (you already have this)
+  placed:false,         // true after we have positioned the king
+  talked:false          // ← **NEW** – have we already shown the conversation?
 };
 
 /* ---------- DIALOGUE HELPERS ---------- */
@@ -114,7 +116,10 @@ function startKingDialogue(){
   document.getElementById('dialogueBox').style.display = 'flex';
   dlgBtn.textContent = 'Next';
   gamePaused = true;
+
+  king.talked = true;       // <-- NEW
 }
+      
 function advanceKingDialogue(){
   king.currentLine++;
 
@@ -286,7 +291,10 @@ function checkDoorCollision(){
 
       if (currentRoom === rooms.buildingC) maybePlaceKing();
       if (currentRoom === rooms.world) maybeAddBuildingC();
-
+      if (currentRoom === rooms.world){
+    // player left the castle – allow a fresh talk next time
+    king.talked = false;      // <-- NEW (optional, but safe)
+}
       return;
     }
   }
@@ -422,16 +430,27 @@ function loop(timestamp){
   updatePlayer(); updateEnemies(); handleEnemyCollisions();
   updateKillEffects(delta); checkDoorCollision(); draw(); drawKillEffects();
 
-  // ---- KING PROXIMITY ----
-  if (currentRoom === rooms.buildingC && !king.active){
-    const talkRange = 80;
-    const cx = king.x + king.w/2, cy = king.y + king.h/2;
-    const px = player.x + player.w/2, py = player.y + player.h/2;
-    if (Math.hypot(cx-px, cy-py) < talkRange){
-      king.active = true;
-      startKingDialogue();
-    }
+ // ---- KING PROXIMITY -------------------------------------------------
+if (currentRoom === rooms.buildingC && !king.active){
+  const talkRange = 80;                     // pixels from king's centre
+  const cx = king.x + king.w/2;
+  const cy = king.y + king.h/2;
+  const px = player.x + player.w/2;
+  const py = player.y + player.h/2;
+  const dist = Math.hypot(cx-px, cy-py);
+
+  // ---- 1️⃣ START DIALOGUE ONLY IF we haven't talked yet ----
+  if (dist < talkRange && !king.talked){
+    king.active = true;
+    startKingDialogue();                    // show the UI
   }
+
+  // ---- 2️⃣ RESET the “talked” flag when we walk away ---------
+  // (so the player can talk again after exiting and re‑entering)
+  if (dist >= talkRange){
+    king.talked = false;
+  }
+}
 
   if (collide()){
     running = false;
