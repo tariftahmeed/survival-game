@@ -5,8 +5,8 @@
 <meta name="viewport"
       content="width=device-width,initial-scale=0.9,maximum-scale=0.9,user-scalable=no,viewport-fit=cover">
 <title>Hungry Reds</title>
+
 <style>
-/* (keep all your existing CSS – unchanged) */
 html,body{margin:0;height:100%;overflow:hidden;background:#111;font-family:Arial,sans-serif}
 body{display:flex;flex-direction:column;align-items:center}
 header{width:100%;background:#223;color:#fff;text-align:center;padding:10px;font-size:20px;position:relative}
@@ -23,6 +23,31 @@ canvas{
 }
 #overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;justify-content:center;align-items:center;flex-direction:column;color:#fff;text-align:center}
 button{padding:12px 22px;font-size:18px;cursor:pointer}
+
+/* ---------- KING DIALOGUE POP‑UP ---------- */
+#dialogueBox{
+  position:fixed; inset:0;
+  background:rgba(0,0,0,.75);
+  display:flex; justify-content:center; align-items:center;
+  z-index:9999;
+}
+.dialogueContent{
+  background:#2c3e50;
+  padding:20px 30px;
+  border-radius:8px;
+  max-width:80%;
+  text-align:center;
+  color:#ecf0f1;
+  font-family:Arial,Helvetica,sans-serif;
+}
+.dialogueContent h2{margin:0 0 .6rem; font-size:1.8rem;}
+.dialogueContent p{margin:0 0 1.2rem; font-size:1.2rem; line-height:1.4;}
+.dialogueContent button{
+  background:#27ae60; border:none; color:#fff;
+  padding:8px 16px; font-size:1rem; border-radius:4px;
+  cursor:pointer;
+}
+.dialogueContent button:hover{background:#2ecc71;}
 </style>
 </head>
 
@@ -98,9 +123,44 @@ const ctx    = canvas.getContext('2d');
 
 let player, enemies = [], kills = 0, lastSpawn = 0, running = false, anim;
 let playerName = '';
-const joystick = {active:false, baseX:0, baseY:0, dx:0, dy:0, max:60};
+let joystick = {active:false, baseX:0, baseY:0, dx:0, dy:0, max:60};
 let lastTime = 0;
 let buildingCAdded = false;
+
+/* ------- NEW GLOBALS ------------------------------------------------- */
+let gamePaused = false;               // pause while dialogue is shown
+/* ---------- KING NPC (inside buildingC) ---------- */
+let king = {
+  x:0, y:0,
+  w:40, h:60,                // size for collision / draw
+  emoji:'🤴',
+  dialogueLines:[
+    "Welcome, brave hero!",
+    "Your deeds have echoed across the realm.",
+    "Take this gift and continue your quest."
+  ],
+  currentLine:0,
+  active:false,
+  placed:false
+};
+
+function startKingDialogue(){
+  document.getElementById('dialogueLine').textContent = king.dialogueLines[0];
+  king.currentLine = 0;
+  document.getElementById('dialogueBox').style.display = 'flex';
+  dlgBtn.textContent = 'Next';          // <-- ensure proper label
+  gamePaused = true;
+}
+function advanceKingDialogue(){
+  king.currentLine++;
+  if (king.currentLine >= king.dialogueLines.length){
+    document.getElementById('dialogueBox').style.display = 'none';
+    gamePaused = false;             // resume the world
+    king.active = false;            // allow a new trigger later (optional)
+  } else {
+    document.getElementById('dialogueLine').textContent = king.dialogueLines[king.currentLine];
+  }
+}
 
 /* ==== 1️⃣ ROOMS DEFINITION (with emoji for each door) ==== */
 const rooms = {
@@ -271,27 +331,28 @@ function checkDoorCollision(){
       player.x < d.x+d.w && player.x+player.w > d.x &&
       player.y < d.y+d.h && player.y+player.h > d.y
     );
-    if (inside){
-      const targetRoom = rooms[d.target];
-      if (!targetRoom){ console.warn('No such room:', d.target); return; }
+   if (inside){
+  const targetRoom = rooms[d.target];
+  // centre the player in the new room
+  player.x = canvas.width/2 - player.w/2;
+  player.y = canvas.height/2 - player.h/2;
 
-      // centre the player in the new room
-      player.x = canvas.width/2 - player.w/2;
-      player.y = canvas.height/2 - player.h/2;
+  // clear any leftover enemies and reset the spawn timer
+  enemies = [];
+  lastSpawn = 0;
 
-      // clear any leftover enemies and reset the spawn timer
-      enemies = [];
-      lastSpawn = 0;
+  currentRoom = targetRoom;
 
-      currentRoom = targetRoom;
+  // ---- NEW: if we just entered the castle, position the king ----
+  if (currentRoom === rooms.buildingC) maybePlaceKing();
 
-      // ---- NEW: if we just entered the world, maybe unlock Building C ----
-      if (currentRoom === rooms.world) {
-        maybeAddBuildingC();
-      }
+  // ---- NEW: if we just entered the world, maybe unlock Building C ----
+  if (currentRoom === rooms.world) {
+    maybeAddBuildingC();
+  }
 
-      return;
-    }
+  return;
+}
   }
 }
 
@@ -311,6 +372,16 @@ function maybeAddBuildingC(){
   });
 
   buildingCAdded = true;               // remember we already did it
+}
+
+/* -------------------------------------------------
+   POSITION THE KING the first time we step inside the castle
+   ------------------------------------------------- */
+function maybePlaceKing(){
+  if (king.placed) return;               // only once
+  king.x = canvas.width/2 - king.w/2;
+  king.y = canvas.height/2 - king.h/2 - 60;   // a little upward so the player stands in front
+  king.placed = true;
 }
 
       
@@ -382,6 +453,15 @@ currentRoom.doors.forEach(d => {
   ctx.fillStyle = '#fff';
   ctx.fillText('🧿', player.x + player.w/2, player.y + player.h/2);
 
+/* ---------- KING (only visible in the castle) ---------- */
+if (currentRoom === rooms.buildingC){
+  ctx.font = '48px Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ffde59';   // gold‑ish so he stands out
+  ctx.fillText(king.emoji, king.x + king.w/2, king.y + king.h/2);
+}
+
   /* ---------- ENEMIES (still emojis) ---------- */
   ctx.font = '28px Arial';
   enemies.forEach(e => {
@@ -407,6 +487,13 @@ currentRoom.doors.forEach(d => {
 /* ==== 4️⃣ MAIN LOOP (call door check) ==== */
 function loop(timestamp){
     if(!running) return;
+// NEW – stop the simulation while a dialogue is open
+// -------------------------------------------------
+      if (gamePaused){
+    // Still request the next frame so the UI can receive key presses
+    anim = requestAnimationFrame(loop);
+    return;
+  }
   const delta = timestamp - lastTime;
   lastTime = timestamp;
 
@@ -422,6 +509,19 @@ function loop(timestamp){
   draw();
   drawKillEffects();           // <-- new drawing pass
 
+// ---- KING PROXIMITY -------------------------------------------------
+if (currentRoom === rooms.buildingC && !king.active){
+  const talkRange = 80;                     // pixels from king's centre
+  const cx = king.x + king.w/2;
+  const cy = king.y + king.h/2;
+  const px = player.x + player.w/2;
+  const py = player.y + player.h/2;
+  const dist = Math.hypot(cx-px, cy-py);
+  if (dist < talkRange){
+    king.active = true;
+    startKingDialogue();                    // show the UI
+  }
+}
   if(collide()){
     running = false;
     cancelAnimationFrame(anim);
@@ -482,6 +582,8 @@ window.addEventListener('load', async ()=>{
   const stored = localStorage.getItem('survivalPlayerName');
   if(stored){ playerName = stored; document.getElementById('playerName').textContent = playerName; }
   await refreshLeaderboard();
+// ensure the dialogue box starts hidden (in case the page was reloaded while it was open)
+document.getElementById('dialogueBox').style.display = 'none';
   startGame();
 });
 
@@ -493,6 +595,49 @@ if('serviceWorker' in navigator){
 
 /* ---- MODERN LISTENER FOR THE “Play Again” BUTTON ---- */
 document.getElementById('retry').addEventListener('click', startGame);
+
+/* ----- DIALOGUE UI ----- */
+const dlgBtn = document.getElementById('dialogueNext');   // <-- renamed ID
+
+dlgBtn.addEventListener('click', advanceKingDialogue);   // one click = advance
+
+function advanceKingDialogue(){
+  king.currentLine++;
+  if (king.currentLine >= king.dialogueLines.length){
+    // conversation finished → hide UI
+    document.getElementById('dialogueBox').style.display = 'none';
+    gamePaused = false;               // resume world
+    king.active = false;               // allow a new trigger later (optional)
+    dlgBtn.textContent = 'Next';       // reset for the next time we talk
+  } else {
+    // show the next line
+    document.getElementById('dialogueLine').textContent = king.dialogueLines[king.currentLine];
+    // change button label only on the *last* line
+    if (king.currentLine === king.dialogueLines.length - 1){
+      dlgBtn.textContent = 'Close';
+    } else {
+      dlgBtn.textContent = 'Next';
+    }
+  }
+}
+
+/* ----- OPTIONAL: keep the E‑key as a fallback (you can delete) ----- */
+window.addEventListener('keydown', e=>{
+  if ((e.key === 'e' || e.key === 'E') && 
+      document.getElementById('dialogueBox').style.display !== 'none'){
+    advanceKingDialogue();
+  }
+});
 </script>
+
+      <!-- KING DIALOGUE BOX (hidden until needed) -->
+<div id="dialogueBox" style="display:none;">
+  <div class="dialogueContent">
+    <h2>🤴 The King</h2>
+    <p id="dialogueLine"></p>
+    <button id="dialogueClose">Next</button>
+  </div>
+</div>
+      
 </body>
 </html>
