@@ -79,6 +79,9 @@ import {
   limit
 } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
 
+/* ----- DIALOGUE UI ----- */
+const dlgBtn = document.getElementById('dialogueNext');   // <-- renamed ID
+      
 /* ---------- YOUR FIREBASE CONFIG ---------- */
 const firebaseConfig = {
   apiKey:           "AIzaSyA6QM9EX21aAG8fmlcv4_z5ZtvNblha-KM",
@@ -151,14 +154,27 @@ function startKingDialogue(){
   dlgBtn.textContent = 'Next';          // <-- ensure proper label
   gamePaused = true;
 }
+
 function advanceKingDialogue(){
   king.currentLine++;
+
+  // If we have shown the last line → close the box
   if (king.currentLine >= king.dialogueLines.length){
     document.getElementById('dialogueBox').style.display = 'none';
-    gamePaused = false;             // resume the world
-    king.active = false;            // allow a new trigger later (optional)
+    gamePaused = false;           // resume the world
+    king.active = false;           // allow the player to trigger again later
+    dlgBtn.textContent = 'Next';  // resets the label for the next conversation
+    return;
+  }
+
+  // Otherwise show the next line
+  document.getElementById('dialogueLine').textContent = king.dialogueLines[king.currentLine];
+
+  // Change button text only on the final line
+  if (king.currentLine === king.dialogueLines.length - 1){
+    dlgBtn.textContent = 'Close';
   } else {
-    document.getElementById('dialogueLine').textContent = king.dialogueLines[king.currentLine];
+    dlgBtn.textContent = 'Next';
   }
 }
 
@@ -331,28 +347,29 @@ function checkDoorCollision(){
       player.x < d.x+d.w && player.x+player.w > d.x &&
       player.y < d.y+d.h && player.y+player.h > d.y
     );
-   if (inside){
-  const targetRoom = rooms[d.target];
-  // centre the player in the new room
-  player.x = canvas.width/2 - player.w/2;
-  player.y = canvas.height/2 - player.h/2;
 
-  // clear any leftover enemies and reset the spawn timer
-  enemies = [];
-  lastSpawn = 0;
+    if (inside){
+      const targetRoom = rooms[d.target];
+      // centre the player in the new room
+      player.x = canvas.width/2 - player.w/2;
+      player.y = canvas.height/2 - player.h/2;
 
-  currentRoom = targetRoom;
+      // clear any leftover enemies and reset the spawn timer
+      enemies = [];
+      lastSpawn = 0;
 
-  // ---- NEW: if we just entered the castle, position the king ----
-  if (currentRoom === rooms.buildingC) maybePlaceKing();
+      currentRoom = targetRoom;
 
-  // ---- NEW: if we just entered the world, maybe unlock Building C ----
-  if (currentRoom === rooms.world) {
-    maybeAddBuildingC();
-  }
+      // ---- NEW: if we just entered the castle, position the king ----
+      if (currentRoom === rooms.buildingC) maybePlaceKing();
 
-  return;
-}
+      // ---- NEW: if we just entered the world, maybe unlock Building C ----
+      if (currentRoom === rooms.world) {
+        maybeAddBuildingC();
+      }
+
+      return;
+    }
   }
 }
 
@@ -596,30 +613,9 @@ if('serviceWorker' in navigator){
 /* ---- MODERN LISTENER FOR THE “Play Again” BUTTON ---- */
 document.getElementById('retry').addEventListener('click', startGame);
 
-/* ----- DIALOGUE UI ----- */
-const dlgBtn = document.getElementById('dialogueNext');   // <-- renamed ID
-
 dlgBtn.addEventListener('click', advanceKingDialogue);   // one click = advance
 
-function advanceKingDialogue(){
-  king.currentLine++;
-  if (king.currentLine >= king.dialogueLines.length){
-    // conversation finished → hide UI
-    document.getElementById('dialogueBox').style.display = 'none';
-    gamePaused = false;               // resume world
-    king.active = false;               // allow a new trigger later (optional)
-    dlgBtn.textContent = 'Next';       // reset for the next time we talk
-  } else {
-    // show the next line
-    document.getElementById('dialogueLine').textContent = king.dialogueLines[king.currentLine];
-    // change button label only on the *last* line
-    if (king.currentLine === king.dialogueLines.length - 1){
-      dlgBtn.textContent = 'Close';
-    } else {
-      dlgBtn.textContent = 'Next';
-    }
-  }
-}
+
 
 /* ----- OPTIONAL: keep the E‑key as a fallback (you can delete) ----- */
 window.addEventListener('keydown', e=>{
@@ -628,16 +624,6 @@ window.addEventListener('keydown', e=>{
     advanceKingDialogue();
   }
 });
-</script>
-
-      <!-- KING DIALOGUE BOX (hidden until needed) -->
-<div id="dialogueBox" style="display:none;">
-  <div class="dialogueContent">
-    <h2>🤴 The King</h2>
-    <p id="dialogueLine"></p>
-    <button id="dialogueClose">Next</button>
-  </div>
-</div>
-      
+</script>  
 </body>
 </html>
