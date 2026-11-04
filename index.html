@@ -94,7 +94,7 @@ let gamePaused = false;        // pause while dialogue is shown
 
 /* ---------- KING NPC (inside buildingC) ---------- */
 let king = {
-  x:0, y:-250,
+  x:0, y:0,
   w:40, h:60,
   emoji:'🤴',
   dialogueLines:[
@@ -316,7 +316,7 @@ function maybeAddBuildingC(){
 function maybePlaceKing(){
   if (king.placed) return;
   king.x = canvas.width/2 - king.w/2;
-  king.y = canvas.height/2 - king.h/2 - 60;
+  king.y = canvas.height/2 - king.h/2 - 250;
   king.placed = true;
 }
 
