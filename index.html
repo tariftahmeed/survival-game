@@ -54,7 +54,7 @@ button{padding:12px 22px;font-size:18px;cursor:pointer}
 <body>
 <header>
   🎮 Survival – <span id="playerLabel">Player: <strong id="playerName"></strong></span>
-  &nbsp;|&nbsp;Score: <span id="score">0</span>   <!-- now shows kills -->
+  &nbsp;|&nbsp;Score: <span id="score">0</span>
 </header>
 
 <div id="leaderboard">
@@ -63,6 +63,15 @@ button{padding:12px 22px;font-size:18px;cursor:pointer}
 </div>
 
 <canvas id="game" width="540" height="1170"></canvas>
+
+<!-- ---------- KING DIALOGUE BOX (hidden until needed) ---------- -->
+<div id="dialogueBox" style="display:none;">
+  <div class="dialogueContent">
+    <h2>🤴 The King</h2>
+    <p id="dialogueLine"></p>
+    <button id="dialogueNext">Next</button>
+  </div>
+</div>
 
 <div id="overlay"><h1>Game Over</h1><p id="final"></p><button id="retry">Play Again</button></div>
 
@@ -79,9 +88,48 @@ import {
   limit
 } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
 
-/* ----- DIALOGUE UI ----- */
-const dlgBtn = document.getElementById('dialogueNext');   // <-- renamed ID
-      
+/* ---------- GLOBALS ------------------------------------------------- */
+let dlgBtn;                     // will be set after the page loads
+let gamePaused = false;        // pause while dialogue is shown
+
+/* ---------- KING NPC (inside buildingC) ---------- */
+let king = {
+  x:0, y:0,
+  w:40, h:60,
+  emoji:'🤴',
+  dialogueLines:[
+    "Welcome, brave hero!",
+    "Your deeds have echoed across the realm.",
+    "Take this gift and continue your quest."
+  ],
+  currentLine:0,
+  active:false,
+  placed:false
+};
+
+/* ---------- DIALOGUE HELPERS ---------- */
+function startKingDialogue(){
+  document.getElementById('dialogueLine').textContent = king.dialogueLines[0];
+  king.currentLine = 0;
+  document.getElementById('dialogueBox').style.display = 'flex';
+  dlgBtn.textContent = 'Next';
+  gamePaused = true;
+}
+function advanceKingDialogue(){
+  king.currentLine++;
+
+  if (king.currentLine >= king.dialogueLines.length){
+    document.getElementById('dialogueBox').style.display = 'none';
+    gamePaused = false;
+    king.active = false;
+    dlgBtn.textContent = 'Next';
+    return;
+  }
+
+  document.getElementById('dialogueLine').textContent = king.dialogueLines[king.currentLine];
+  dlgBtn.textContent = (king.currentLine === king.dialogueLines.length - 1) ? 'Close' : 'Next';
+}
+
 /* ---------- YOUR FIREBASE CONFIG ---------- */
 const firebaseConfig = {
   apiKey:           "AIzaSyA6QM9EX21aAG8fmlcv4_z5ZtvNblha-KM",
@@ -110,12 +158,12 @@ async function fetchTop3(){
   return list;
 }
 async function refreshLeaderboard(){
-  const top   = await fetchTop3();
-  const ol    = document.getElementById('topList');
+  const top = await fetchTop3();
+  const ol = document.getElementById('topList');
   ol.innerHTML = "";
   top.forEach(entry=>{
     const li = document.createElement('li');
-    li.textContent = `${entry.name}: ${entry.score}`;   // no “s” suffix – it's kills
+    li.textContent = `${entry.name}: ${entry.score}`;
     ol.appendChild(li);
   });
 }
@@ -130,110 +178,7 @@ let joystick = {active:false, baseX:0, baseY:0, dx:0, dy:0, max:60};
 let lastTime = 0;
 let buildingCAdded = false;
 
-/* ------- NEW GLOBALS ------------------------------------------------- */
-let gamePaused = false;               // pause while dialogue is shown
-/* ---------- KING NPC (inside buildingC) ---------- */
-let king = {
-  x:0, y:0,
-  w:40, h:60,                // size for collision / draw
-  emoji:'🤴',
-  dialogueLines:[
-    "Welcome, brave hero!",
-    "Your deeds have echoed across the realm.",
-    "Take this gift and continue your quest."
-  ],
-  currentLine:0,
-  active:false,
-  placed:false
-};
-
-function startKingDialogue(){
-  document.getElementById('dialogueLine').textContent = king.dialogueLines[0];
-  king.currentLine = 0;
-  document.getElementById('dialogueBox').style.display = 'flex';
-  dlgBtn.textContent = 'Next';          // <-- ensure proper label
-  gamePaused = true;
-}
-
-function advanceKingDialogue(){
-  king.currentLine++;
-
-  // If we have shown the last line → close the box
-  if (king.currentLine >= king.dialogueLines.length){
-    document.getElementById('dialogueBox').style.display = 'none';
-    gamePaused = false;           // resume the world
-    king.active = false;           // allow the player to trigger again later
-    dlgBtn.textContent = 'Next';  // resets the label for the next conversation
-    return;
-  }
-
-  // Otherwise show the next line
-  document.getElementById('dialogueLine').textContent = king.dialogueLines[king.currentLine];
-
-  // Change button text only on the final line
-  if (king.currentLine === king.dialogueLines.length - 1){
-    dlgBtn.textContent = 'Close';
-  } else {
-    dlgBtn.textContent = 'Next';
-  }
-}
-
-/* ==== 1️⃣ ROOMS DEFINITION (with emoji for each door) ==== */
-const rooms = {
-  world: {
-    name: "World",
-    bg: "#4caf50",
-    doors: [
-      // world → Building A
-      {x:30, y:540, w:80, h:80, target:"buildingA", emoji:"🏠"},
-      // world → Building B
-      {x:380, y:20, w:80, h:80, target:"buildingB", emoji:"🏢"}
-    ],
-    spawnEnemy(){ /* empty – world stays peaceful */ }
-  },
-
-  buildingA: {
-    name: "Building A",
-    bg: "#8b4513",
-    doors: [
-      // back to world
-      {x:200, y:660, w:80, h:80, target:"world", emoji:"🚪"}   // "back" arrow emoji (optional)
-    ],
-    spawnEnemy(){},
-        
-    // LIST OF INTERIOR EMOJIS (tables, chairs, bed)
-    decor: [
-      // two chairs (🪑) placed side‑by‑side
-      {x:150, y:300, emoji:"🪑"},
-      {x:230, y:300, emoji:"🪑"},
-      {x:190, y:460, emoji:"🛏️"}
-    ]
-  },
-
- buildingB: {
-    name: "Building B",
-    bg: "#3b5998",
-    doors: [
-      {x:200, y:20, w:80, h:80, target:"world", emoji:"🚪", lockedEmoji: "🔒", requiredKills: 10, showLock: true}
-    ],
-    spawnEnemy(){ spawnEnemy(); }
-  },
-
-buildingC: {
-  name: "Building C",
-  bg: "#d1e8f0",                     // a different colour so you can recognise it
-  doors: [
-    // back to the world
-    {x:200, y:660, w:80, h:80, target:"world", emoji:"🚪"}
-  ],
-  // you can give it its own enemies or leave it peaceful
-  spawnEnemy(){ /* optional – e.g. spawnEnemy(); */ },
-}
-};
-
-let currentRoom = rooms.world;
-      
-/* ---- PLAYER NAME (local storage for convenience) ---- */
+/* ---- PLAYER NAME (local storage) ---- */
 function askForName(){
   const stored = localStorage.getItem('survivalPlayerName');
   if(stored){ playerName = stored; }
@@ -278,41 +223,26 @@ function updateEnemies(){
   });
 }
 
-/* ---- ENEMY‑ENEMY COLLISION: increase kills, remove them, and show a flash ---- */
+/* ---- ENEMY‑ENEMY COLLISION & KILL EFFECT ---- */
 function handleEnemyCollisions(){
-  const toRemove = new Set();               // indices that will be deleted
+  const toRemove = new Set();
 
-  for (let i = 0; i < enemies.length; i++) {
-    for (let j = i + 1; j < enemies.length; j++) {
-      const a = enemies[i], b = enemies[j];
-
-      // AABB overlap test
-      if (a.x < b.x + b.w && a.x + a.w > b.x &&
-          a.y < b.y + b.h && a.y + a.h > b.y) {
-
-        // --- 1️⃣ Mark both enemies for removal ---
-        toRemove.add(i);
-        toRemove.add(j);
-
-        // --- 2️⃣ Create the visual “kill” effect ---
-        // midpoint of the two sprites (using their centres)
+  for (let i=0;i<enemies.length;i++){
+    for (let j=i+1;j<enemies.length;j++){
+      const a=enemies[i], b=enemies[j];
+      if (a.x < b.x+b.w && a.x+a.w > b.x &&
+          a.y < b.y+b.h && a.y+a.h > b.y){
+        toRemove.add(i); toRemove.add(j);
         const midX = (a.x + b.x) / 2 + a.w / 2;
         const midY = (a.y + b.y) / 2 + a.h / 2;
-        // ttl = 200 ms → the effect lives for about 0.2 s
-        killEffects.push({x: midX, y: midY, ttl: 200});
+        killEffects.push({x:midX, y:midY, ttl:200});
       }
     }
   }
-
-  // Every *pair* of enemies that collided counts as ONE kill.
-  kills += Math.floor(toRemove.size / 2);
-
-  // Remove the collided enemies
-  enemies = enemies.filter((_, idx) => !toRemove.has(idx));
+  kills += Math.floor(toRemove.size/2);
+  enemies = enemies.filter((_,i)=>!toRemove.has(i));
 }
-
-/* --------- KILL‑EFFECT (flashing ⚔️) ---------- */
-let killEffects = []; // {x, y, ttl}
+let killEffects = []; // {x,y,ttl}
 function updateKillEffects(delta){
   killEffects.forEach(e=> e.ttl -= delta);
   killEffects = killEffects.filter(e=> e.ttl>0);
@@ -323,13 +253,12 @@ function drawKillEffects(){
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#ff4444';
   killEffects.forEach(e=>{
-    const opacity = Math.max(0, e.ttl/200);
-    ctx.globalAlpha = opacity;
+    ctx.globalAlpha = Math.max(0, e.ttl/200);
     ctx.fillText('⚔️', e.x, e.y);
   });
   ctx.globalAlpha = 1;
 }
-      
+
 /* ---- PLAYER‑ENEMY COLLISION (game over) ---- */
 function collide(){
   return enemies.some(e=>
@@ -341,7 +270,7 @@ function collide(){
 function checkDoorCollision(){
   for (const d of currentRoom.doors){
     const unlocked = (!d.requiredKills) || (kills >= d.requiredKills);
-    if (!unlocked) continue;   // ignore locked doors completely
+    if (!unlocked) continue;
 
     const inside = (
       player.x < d.x+d.w && player.x+player.w > d.x &&
@@ -350,23 +279,13 @@ function checkDoorCollision(){
 
     if (inside){
       const targetRoom = rooms[d.target];
-      // centre the player in the new room
       player.x = canvas.width/2 - player.w/2;
       player.y = canvas.height/2 - player.h/2;
-
-      // clear any leftover enemies and reset the spawn timer
-      enemies = [];
-      lastSpawn = 0;
-
+      enemies = []; lastSpawn = 0;
       currentRoom = targetRoom;
 
-      // ---- NEW: if we just entered the castle, position the king ----
       if (currentRoom === rooms.buildingC) maybePlaceKing();
-
-      // ---- NEW: if we just entered the world, maybe unlock Building C ----
-      if (currentRoom === rooms.world) {
-        maybeAddBuildingC();
-      }
+      if (currentRoom === rooms.world) maybeAddBuildingC();
 
       return;
     }
@@ -375,40 +294,59 @@ function checkDoorCollision(){
 
 /* ==== add BUILDING C ==== */
 function maybeAddBuildingC(){
-  // 1️⃣ Only run once
   if (buildingCAdded) return;
-
-  // 2️⃣ Player must have at least 10 kills
   if (kills < 10) return;
-
-  // 3️⃣ Add a new door to the *world* room
   rooms.world.doors.push({
-    x:200, y:140, w:80, h:80,          // choose a free spot (doesn't overlap existing doors)
+    x:200, y:140, w:80, h:80,
     target:"buildingC",
-    emoji:"🏰"                         // a castle emoji – you can pick any you like
+    emoji:"🏰"
   });
-
-  buildingCAdded = true;               // remember we already did it
+  buildingCAdded = true;
 }
 
-/* -------------------------------------------------
-   POSITION THE KING the first time we step inside the castle
-   ------------------------------------------------- */
+/* ==== POSITION THE KING (first time we enter castle) ==== */
 function maybePlaceKing(){
-  if (king.placed) return;               // only once
+  if (king.placed) return;
   king.x = canvas.width/2 - king.w/2;
-  king.y = canvas.height/2 - king.h/2 - 60;   // a little upward so the player stands in front
+  king.y = canvas.height/2 - king.h/2 - 60;
   king.placed = true;
 }
 
-      
-/* ==== 3️⃣ DRAW (background + doors) ==== */
+/* ==== 1️⃣ ROOMS DEFINITION ==== */
+const rooms = {
+  world:{ name:"World", bg:"#4caf50", doors:[
+      {x:30, y:540, w:80, h:80, target:"buildingA", emoji:"🏠"},
+      {x:380, y:20, w:80, h:80, target:"buildingB", emoji:"🏢"}
+    ], spawnEnemy(){ } },
+
+  buildingA:{ name:"Building A", bg:"#8b4513", doors:[
+      {x:200, y:660, w:80, h:80, target:"world", emoji:"🚪"}
+    ], spawnEnemy(){},
+    decor:[
+      {x:150, y:300, emoji:"🪑"},
+      {x:230, y:300, emoji:"🪑"},
+      {x:190, y:460, emoji:"🛏️"}
+    ] },
+
+  buildingB:{ name:"Building B", bg:"#3b5998", doors:[
+      {x:200, y:20, w:80, h:80, target:"world", emoji:"🚪",
+       lockedEmoji:"🔒", requiredKills:10, showLock:true}
+    ], spawnEnemy(){ spawnEnemy(); } },
+
+  buildingC:{ name:"Building C", bg:"#d1e8f0", doors:[
+      {x:200, y:660, w:80, h:80, target:"world", emoji:"🚪"}
+    ], spawnEnemy(){ } }
+};
+
+let currentRoom = rooms.world;
+
+/* ==== 3️⃣ DRAW ==== */
 function draw(){
-  /* ---------- BACKGROUND (room colour) ---------- */
+  /* background */
   ctx.fillStyle = currentRoom.bg;
   ctx.fillRect(0,0,canvas.width,canvas.height);
 
-  /* ---------- OPTIONAL GRID (unchanged) ---------- */
+  /* optional grid */
   ctx.strokeStyle='rgba(255,255,255,.08)';
   for(let x=0;x<canvas.width;x+=40){
     ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke();
@@ -417,97 +355,60 @@ function draw(){
     ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke();
   }
 
- /* ---------- DOORS (as emojis, with lock check) ---------- */
-ctx.font = '48px Arial';
-ctx.textAlign = 'center';
-ctx.textBaseline = 'middle';
-ctx.fillStyle = '#000';
-
-currentRoom.doors.forEach(d => {
-  // Show the door only if it has no lock OR the player already has enough kills
-      const unlocked = (!d.requiredKills) || (kills >= d.requiredKills);
-      
-      // ----- UNLOCKED -------------------------------------------------
-      if (unlocked) {
-      const emoji = d.emoji || '🚪';
-      ctx.fillText(emoji, d.x + d.w/2, d.y + d.h/2);
-      return;            // nothing else for this door
-      }
-      
-      // ----- LOCKED ---------------------------------------------------
-      const lock = d.lockedEmoji || '🔒';
+  /* doors */
+  ctx.font='48px Arial'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillStyle='#000';
+  currentRoom.doors.forEach(d=>{
+    const unlocked = (!d.requiredKills) || (kills >= d.requiredKills);
+    if (unlocked){
+      ctx.fillText(d.emoji||'🚪', d.x+d.w/2, d.y+d.h/2);
+    }else{
+      const lock = d.lockedEmoji||'🔒';
       ctx.globalAlpha = 0.7;
-      ctx.fillText(lock, d.x + d.w/2, d.y + d.h/2);
+      ctx.fillText(lock, d.x+d.w/2, d.y+d.h/2);
       ctx.globalAlpha = 1;
-      
-      if (d.showLock) {
-      ctx.font = '20px Arial';
-      ctx.fillStyle = '#ffcc00';
-      ctx.fillText(`${d.requiredKills}`, d.x + d.w/2, d.y + d.h + 14);
-      ctx.font = '48px Arial';
-      ctx.fillStyle = '#fff';
+      if (d.showLock){
+        ctx.font='20px Arial'; ctx.fillStyle='#ffcc00';
+        ctx.fillText(`${d.requiredKills}`, d.x+d.w/2, d.y+d.h+14);
+        ctx.font='48px Arial'; ctx.fillStyle='#fff';
       }
-});
-
-      
-/* ---------- ROOM‑SPECIFIC DECOR (tables, chairs, bed) ---------- */
-  if (currentRoom.decor && currentRoom.decor.length){
-    ctx.font = '36px Arial';            // a little smaller than doors
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#fff';
-
-    currentRoom.decor.forEach(item => {
-      // `item.x` and `item.y` already represent the centre of the emoji
-      ctx.fillText(item.emoji, item.x, item.y);
-    });
-  }
-        
-  /* ---------- PLAYER (still an emoji) ---------- */
-  ctx.font = '30px Arial';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#fff';
-  ctx.fillText('🧿', player.x + player.w/2, player.y + player.h/2);
-
-/* ---------- KING (only visible in the castle) ---------- */
-if (currentRoom === rooms.buildingC){
-  ctx.font = '48px Arial';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#ffde59';   // gold‑ish so he stands out
-  ctx.fillText(king.emoji, king.x + king.w/2, king.y + king.h/2);
-}
-
-  /* ---------- ENEMIES (still emojis) ---------- */
-  ctx.font = '28px Arial';
-  enemies.forEach(e => {
-    ctx.fillText('👾', e.x + e.w/2, e.y + e.h/2);
+    }
   });
 
-  /* ---------- JOYSTICK (visual aid) ---------- */
-  if(joystick.active){
-    ctx.beginPath();
-    ctx.strokeStyle='rgba(255,255,255,.4)';
-    ctx.lineWidth=3;
-    ctx.arc(joystick.baseX,joystick.baseY,40,0,Math.PI*2);
-    ctx.stroke();
+  /* room‑specific decor */
+  if (currentRoom.decor && currentRoom.decor.length){
+    ctx.font='36px Arial'; ctx.fillStyle='#fff';
+    currentRoom.decor.forEach(item=> ctx.fillText(item.emoji, item.x, item.y));
+  }
 
-    ctx.beginPath();
-    ctx.fillStyle='rgba(255,255,255,.5)';
-    ctx.arc(joystick.baseX+joystick.dx,
-            joystick.baseY+joystick.dy,
-            20,0,Math.PI*2);
+  /* player */
+  ctx.font='30px Arial'; ctx.fillStyle='#fff';
+  ctx.fillText('🧿', player.x+player.w/2, player.y+player.h/2);
+
+  /* king – only in the castle */
+  if (currentRoom === rooms.buildingC){
+    ctx.font='48px Arial'; ctx.fillStyle='#ffde59';
+    ctx.fillText(king.emoji, king.x+king.w/2, king.y+king.h/2);
+  }
+
+  /* enemies */
+  ctx.font='28px Arial';
+  enemies.forEach(e=> ctx.fillText('👾', e.x+e.w/2, e.y+e.h/2));
+
+  /* joystick visual aid */
+  if (joystick.active){
+    ctx.beginPath(); ctx.strokeStyle='rgba(255,255,255,.4)'; ctx.lineWidth=3;
+    ctx.arc(joystick.baseX, joystick.baseY, 40, 0, Math.PI*2); ctx.stroke();
+
+    ctx.beginPath(); ctx.fillStyle='rgba(255,255,255,.5)';
+    ctx.arc(joystick.baseX+joystick.dx, joystick.baseY+joystick.dy, 20, 0, Math.PI*2);
     ctx.fill();
   }
 }
-/* ==== 4️⃣ MAIN LOOP (call door check) ==== */
+
+/* ==== 4️⃣ MAIN LOOP ==== */
 function loop(timestamp){
-    if(!running) return;
-// NEW – stop the simulation while a dialogue is open
-// -------------------------------------------------
-      if (gamePaused){
-    // Still request the next frame so the UI can receive key presses
+  if (!running) return;
+  if (gamePaused){
     anim = requestAnimationFrame(loop);
     return;
   }
@@ -516,30 +417,23 @@ function loop(timestamp){
 
   document.getElementById('score').textContent = kills;
 
-  if(timestamp - lastSpawn > 1200){ currentRoom.spawnEnemy(); lastSpawn = timestamp; }
+  if (timestamp - lastSpawn > 1200) { currentRoom.spawnEnemy(); lastSpawn = timestamp; }
 
-  updatePlayer();
-  updateEnemies();
-  handleEnemyCollisions();
-  updateKillEffects(delta);
-  checkDoorCollision();
-  draw();
-  drawKillEffects();           // <-- new drawing pass
+  updatePlayer(); updateEnemies(); handleEnemyCollisions();
+  updateKillEffects(delta); checkDoorCollision(); draw(); drawKillEffects();
 
-// ---- KING PROXIMITY -------------------------------------------------
-if (currentRoom === rooms.buildingC && !king.active){
-  const talkRange = 80;                     // pixels from king's centre
-  const cx = king.x + king.w/2;
-  const cy = king.y + king.h/2;
-  const px = player.x + player.w/2;
-  const py = player.y + player.h/2;
-  const dist = Math.hypot(cx-px, cy-py);
-  if (dist < talkRange){
-    king.active = true;
-    startKingDialogue();                    // show the UI
+  // ---- KING PROXIMITY ----
+  if (currentRoom === rooms.buildingC && !king.active){
+    const talkRange = 80;
+    const cx = king.x + king.w/2, cy = king.y + king.h/2;
+    const px = player.x + player.w/2, py = player.y + player.h/2;
+    if (Math.hypot(cx-px, cy-py) < talkRange){
+      king.active = true;
+      startKingDialogue();
+    }
   }
-}
-  if(collide()){
+
+  if (collide()){
     running = false;
     cancelAnimationFrame(anim);
     document.getElementById('final').innerHTML = `You scored ${kills}. <br>Hint: You need certain points to proceed in the game.`;
@@ -552,14 +446,14 @@ if (currentRoom === rooms.buildingC && !king.active){
 
 /* ==== START / RESTART ==== */
 function startGame(){
-  if(!playerName) askForName();
+  if (!playerName) askForName();
   document.getElementById('overlay').style.display = 'none';
   reset();
   running = true;
   requestAnimationFrame(loop);
 }
 
-/* ---- JOYSTICK INPUT (touch / mouse) ---- */
+/* ---- JOYSTICK INPUT ---- */
 function pos(e){
   const r = canvas.getBoundingClientRect();
   return {
@@ -574,12 +468,12 @@ canvas.addEventListener('pointerdown', e=>{
   joystick.dx = joystick.dy = 0;
 });
 canvas.addEventListener('pointermove', e=>{
-  if(!joystick.active) return;
+  if (!joystick.active) return;
   const p = pos(e);
   let dx = p.x - joystick.baseX,
       dy = p.y - joystick.baseY;
   const d = Math.hypot(dx,dy);
-  if(d > joystick.max){ dx = dx/d * joystick.max; dy = dy/d * joystick.max; }
+  if (d > joystick.max){ dx = dx/d * joystick.max; dy = dy/d * joystick.max; }
   joystick.dx = dx; joystick.dy = dy;
 });
 canvas.addEventListener('pointerup',()=>{ joystick.active=false; joystick.dx=0; joystick.dy=0; });
@@ -597,33 +491,33 @@ resize();
 /* ==== PAGE LOAD ==== */
 window.addEventListener('load', async ()=>{
   const stored = localStorage.getItem('survivalPlayerName');
-  if(stored){ playerName = stored; document.getElementById('playerName').textContent = playerName; }
+  if (stored){ playerName = stored; document.getElementById('playerName').textContent = playerName; }
   await refreshLeaderboard();
-// ensure the dialogue box starts hidden (in case the page was reloaded while it was open)
-document.getElementById('dialogueBox').style.display = 'none';
+
+  // hide the dialogue box and grab the button (now it exists)
+  document.getElementById('dialogueBox').style.display = 'none';
+  dlgBtn = document.getElementById('dialogueNext');
+  dlgBtn.addEventListener('click', advanceKingDialogue);
+
   startGame();
 });
 
-/* ---- OPTIONAL SERVICE‑WORKER (offline caching) ---- */
+/* ---- OPTIONAL SERVICE‑WORKER ---- */
 if('serviceWorker' in navigator){
   navigator.serviceWorker.register('sw.js')
     .catch(e=>console.warn('SW registration failed',e));
 }
 
-/* ---- MODERN LISTENER FOR THE “Play Again” BUTTON ---- */
+/* ---- PLAY AGAIN BUTTON ---- */
 document.getElementById('retry').addEventListener('click', startGame);
-
-dlgBtn.addEventListener('click', advanceKingDialogue);   // one click = advance
-
-
 
 /* ----- OPTIONAL: keep the E‑key as a fallback (you can delete) ----- */
 window.addEventListener('keydown', e=>{
-  if ((e.key === 'e' || e.key === 'E') && 
+  if ((e.key === 'e' || e.key === 'E') &&
       document.getElementById('dialogueBox').style.display !== 'none'){
     advanceKingDialogue();
   }
 });
-</script>  
+</script>
 </body>
 </html>
