@@ -92,6 +92,11 @@ import {
 let dlgBtn;                     // will be set after the page loads
 let gamePaused = false;        // pause while dialogue is shown
 
+/* ---------- GLOBAL HEALTH VARIABLES ---------- */
+const MAX_HEALTH   = 3;            // you can raise this if you want more “HP”
+let playerHealth   = MAX_HEALTH;    // current HP – starts full but hidden
+let showHealthBar  = false;        // true → draw the bar
+      
 /* ---------- KING NPC (inside buildingC) ---------- */
 let king = {
   x:0, y:0,
@@ -123,14 +128,22 @@ function startKingDialogue(){
 function advanceKingDialogue(){
   king.currentLine++;
 
+  // ----- END OF CONVERSATION -----
   if (king.currentLine >= king.dialogueLines.length){
     document.getElementById('dialogueBox').style.display = 'none';
     gamePaused = false;
     king.active = false;
     dlgBtn.textContent = 'Next';
+
+    // <<<--- NEW: enable and refill the health bar -----------------
+    showHealthBar = true;          // make the bar appear
+    playerHealth   = MAX_HEALTH;   // full health again
+    // ----------------------------------------------------------------
+
     return;
   }
 
+  // ----- CONTINUE TO NEXT LINE -----
   document.getElementById('dialogueLine').textContent = king.dialogueLines[king.currentLine];
   dlgBtn.textContent = (king.currentLine === king.dialogueLines.length - 1) ? 'Close' : 'Next';
 }
@@ -262,6 +275,30 @@ function drawKillEffects(){
     ctx.fillText('⚔️', e.x, e.y);
   });
   ctx.globalAlpha = 1;
+}
+
+/* ---------- DRAW HEALTH BAR (top‑center of the canvas) ---------- */
+function drawHealthBar(){
+  if (!showHealthBar) return;          // nothing to draw
+
+  const barW = 200;                     // total width of the bar (px)
+  const barH = 20;                      // height (px)
+  const x    = (canvas.width - barW) / 2;   // centre horizontally
+  const y    = 12;                      // a little margin from the top
+
+  // ---- background (dark grey) ----
+  ctx.fillStyle = '#555';
+  ctx.fillRect(x, y, barW, barH);
+
+  // ---- current health (green) ----
+  const curW = (playerHealth / MAX_HEALTH) * barW;
+  ctx.fillStyle = '#0f0';
+  ctx.fillRect(x, y, curW, barH);
+
+  // ---- white border ----
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth   = 2;
+  ctx.strokeRect(x, y, barW, barH);
 }
 
 /* ---- PLAYER‑ENEMY COLLISION (game over) ---- */
@@ -411,6 +448,8 @@ function draw(){
     ctx.arc(joystick.baseX+joystick.dx, joystick.baseY+joystick.dy, 20, 0, Math.PI*2);
     ctx.fill();
   }
+/* draw the health bar on top of everything */
+drawHealthBar();
 }
 
 /* ==== 4️⃣ MAIN LOOP ==== */
@@ -452,12 +491,18 @@ if (currentRoom === rooms.buildingC && !king.active){
   }
 }
 
-  if (collide()){
+    if (collide()){
     running = false;
     cancelAnimationFrame(anim);
     document.getElementById('final').innerHTML = `You scored ${kills}. <br>Hint: You need certain points to proceed in the game.`;
     document.getElementById('overlay').style.display = 'flex';
     pushScore(playerName, kills);
+
+    // <<<--- NEW: hide health bar on death -----------------
+    showHealthBar = false;
+    playerHealth   = 0;
+    // -----------------------------------------------------
+
     return;
   }
   anim = requestAnimationFrame(loop);
