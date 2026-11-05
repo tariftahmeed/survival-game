@@ -341,6 +341,7 @@ function damagePlayer(delta){
       // ----- we got hit! -----
       playerHealth--;               // lose one HP
       playerInvuln = INVULN_TIME;  // start the short invulnerability period
+      player.flashTimer = INVULN_TIME;
       break;                        // only one hit per frame
     }
   }
@@ -464,7 +465,14 @@ function draw(){
   }
 
   /* player */
-  ctx.font='30px Arial'; ctx.fillStyle='#fff';
+  ctx.font='30px Arial';
+  // If we are flashing, draw the player in red; otherwise white
+  if (player.flashTimer > 0){
+    ctx.fillStyle = '#f44';
+    player.flashTimer -= delta;   // delta comes from the loop (you may need to pass it)
+  }else{
+    ctx.fillStyle = '#fff';
+  }
   ctx.fillText('🧿', player.x+player.w/2, player.y+player.h/2);
 
   /* king – only in the castle */
