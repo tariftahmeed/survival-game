@@ -85,7 +85,8 @@ import {
   getDocs,
   query,
   orderBy,
-  limit
+  limit,
+  serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
 
 /* ---------- GLOBALS ------------------------------------------------- */
@@ -168,9 +169,21 @@ const db    = getFirestore(app);
 const scoresCol = collection(db, "survivalScores");
 
 /* ---------- LEADERBOARD HELPERS ---------- */
-async function pushScore(name, kills){
-  await addDoc(scoresCol,{name, score:kills, ts: Date.now()});
-  await refreshLeaderboard();
+/* ---------- RECORD PLAY SESSION (date+time) ---------- */
+async function recordPlaySession(name, kills){
+  try {
+    await addDoc(scoresCol, {
+      name,                // player name
+      score: kills,        // final kills / score
+      playedAt: serverTimestamp()   // <-- Firestore‑generated timestamp
+    });
+    // optional: you could also store a formatted string for easy reading
+    // const now = new Date();
+    // await addDoc(scoresCol, { name, score: kills, playedAt: serverTimestamp(),
+    //                           playedOn: now.toISOString() });
+  } catch (e){
+    console.warn('Failed to write play session:', e);
+  }
 }
 async function fetchTop3(){
   const q    = query(scoresCol, orderBy("score","desc"), limit(3));
@@ -526,7 +539,7 @@ function loop(timestamp){
       cancelAnimationFrame(anim);
       document.getElementById('final').innerHTML = `You scored ${kills}. <br>Hint: You need certain points to proceed in the game.`;
       document.getElementById('overlay').style.display = 'flex';
-      pushScore(playerName, kills);
+      recordPlaySession(playerName, kills);
       // hide the health bar just in case (it isn’t shown yet)
       showHealthBar = false;
       playerHealth   = 0;
