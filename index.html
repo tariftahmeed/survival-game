@@ -91,17 +91,15 @@ import {
 
 /* ---------- GLOBALS ------------------------------------------------- */
 let dlgBtn;                     // will be set after the page loads
-let gamePaused = false;        // pause while dialogue is shown
+let gamePaused = false;         // pause while dialogue is shown
 
-/* ---------- GLOBAL HEALTH VARIABLES ---------- */
-const MAX_HEALTH   = 3;            // you can raise this if you want more “HP”
-let playerHealth   = MAX_HEALTH;    // current HP – starts full but hidden
-let showHealthBar  = false;        // true → draw the bar
+/* ---------- PLAYER & HEALTH SETTINGS ---------- */
+const MAX_HEALTH   = 3;                 // you can raise this if you like
+let playerHealth   = MAX_HEALTH;       // current HP (starts full but hidden)
+let showHealthBar  = false;            // true → draw the bar
+const INVULN_TIME = 800;               // ms of immunity after a hit
+let playerInvuln   = 0;                 // counts down while immune
 
-/* DAMAGE SETTINGS */
-const INVULN_TIME = 800; // milliseconds of immunity after a hit
-let playerInvuln = 0; // counts down while the player is immune
-      
 /* ---------- KING NPC (inside buildingC) ---------- */
 let king = {
   x:0, y:0,
@@ -113,47 +111,12 @@ let king = {
     "Take this gift and continue your quest."
   ],
   currentLine:0,
-  /* NEW --------------------------------------------------- */
-  active:false,          // true while the UI is open (you already have this)
-  placed:false,         // true after we have positioned the king
-  talked:false          // ← **NEW** – have we already shown the conversation?
+  active:false,          // true while the UI is open
+  placed:false,          // true after we have positioned the king
+  talked:false           // have we already finished a conversation?
 };
 
-/* ---------- DIALOGUE HELPERS ---------- */
-function startKingDialogue(){
-  document.getElementById('dialogueLine').textContent = king.dialogueLines[0];
-  king.currentLine = 0;
-  document.getElementById('dialogueBox').style.display = 'flex';
-  dlgBtn.textContent = 'Next';
-  gamePaused = true;
-
-  king.talked = true;       // <-- NEW
-}
-      
-function advanceKingDialogue(){
-  king.currentLine++;
-
-  // ----- END OF CONVERSATION -----
-  if (king.currentLine >= king.dialogueLines.length){
-    document.getElementById('dialogueBox').style.display = 'none';
-    gamePaused = false;
-    king.active = false;
-    dlgBtn.textContent = 'Next';
-
-    // <<<--- NEW: enable and refill the health bar -----------------
-    showHealthBar = true;          // make the bar appear
-    playerHealth   = MAX_HEALTH;   // full health again
-    // ----------------------------------------------------------------
-
-    return;
-  }
-
-  // ----- CONTINUE TO NEXT LINE -----
-  document.getElementById('dialogueLine').textContent = king.dialogueLines[king.currentLine];
-  dlgBtn.textContent = (king.currentLine === king.dialogueLines.length - 1) ? 'Close' : 'Next';
-}
-
-/* ---------- YOUR FIREBASE CONFIG ---------- */
+/* ---------- FIREBASE CONFIG ---------- */
 const firebaseConfig = {
   apiKey:           "AIzaSyA6QM9EX21aAG8fmlcv4_z5ZtvNblha-KM",
   authDomain:       "survival-global-lb.firebaseapp.com",
@@ -168,23 +131,20 @@ const app   = initializeApp(firebaseConfig);
 const db    = getFirestore(app);
 const scoresCol = collection(db, "survivalScores");
 
-/* ---------- LEADERBOARD HELPERS ---------- */
-/* ---------- RECORD PLAY SESSION (date+time) ---------- */
+/* ---------- RECORD A PLAY SESSION (with timestamp) ---------- */
 async function recordPlaySession(name, kills){
-  try {
+  try{
     await addDoc(scoresCol, {
-      name,                // player name
-      score: kills,        // final kills / score
+      name,
+      score: kills,
       playedAt: serverTimestamp()   // <-- Firestore‑generated timestamp
     });
-    // optional: you could also store a formatted string for easy reading
-    // const now = new Date();
-    // await addDoc(scoresCol, { name, score: kills, playedAt: serverTimestamp(),
-    //                           playedOn: now.toISOString() });
-  } catch (e){
+  }catch(e){
     console.warn('Failed to write play session:', e);
   }
 }
+
+/* ---------- FETCH TOP‑3 FOR LEADERBOARD ---------- */
 async function fetchTop3(){
   const q    = query(scoresCol, orderBy("score","desc"), limit(3));
   const snap = await getDocs(q);
@@ -192,9 +152,11 @@ async function fetchTop3(){
   snap.forEach(doc=>{ const d = doc.data(); list.push({name:d.name, score:d.score}); });
   return list;
 }
+
+/* ---------- REFRESH LEADERBOARD UI ---------- */
 async function refreshLeaderboard(){
   const top = await fetchTop3();
-  const ol = document.getElementById('topList');
+  const ol  = document.getElementById('topList');
   ol.innerHTML = "";
   top.forEach(entry=>{
     const li = document.createElement('li');
@@ -203,21 +165,23 @@ async function refreshLeaderboard(){
   });
 }
 
-/* ====================== GAME CODE ====================== */
+/* ---------- CANVAS & CONTEXT ---------- */
 const canvas = document.getElementById('game');
 const ctx    = canvas.getContext('2d');
 
+/* ---------- GAME STATE ---------- */
 let player, enemies = [], kills = 0, lastSpawn = 0, running = false, anim;
 let playerName = '';
 let joystick = {active:false, baseX:0, baseY:0, dx:0, dy:0, max:60};
 let lastTime = 0;
 let buildingCAdded = false;
 
-/* ---- PLAYER NAME (local storage) ---- */
+/* ---------- PLAYER NAME (local storage) ---------- */
 function askForName(){
   const stored = localStorage.getItem('survivalPlayerName');
-  if(stored){ playerName = stored; }
-  else{
+  if (stored){
+    playerName = stored;
+  }else{
     let name = '';
     while(!name){ name = prompt('Enter your name (will appear on the global leaderboard)'); }
     playerName = name.trim();
@@ -226,31 +190,31 @@ function askForName(){
   document.getElementById('playerName').textContent = playerName;
 }
 
-/* ---- BASIC GAME SETUP ---- */
+/* ---------- BASIC GAME SETUP ---------- */
 function reset(){
-      player={x:220, y:330, w:30, h:30, speed:4.5};
-      enemies=[];
-      kills = 0;
+  player = {x:220, y:330, w:30, h:30, speed:4.5};
+  enemies = [];
+  kills   = 0;
 
-      // restore full health and hide the bar on fresh start
-      playerHealth = MAX_HEALTH;
-      showHealthBar = false;
-      playerInvuln = 0;
+  // health & UI reset
+  playerHealth   = MAX_HEALTH;
+  showHealthBar  = false;
+  playerInvuln   = 0;
+  player.flashTimer = 0;
 }
-
 function spawnEnemy(){
   const side = Math.floor(Math.random()*4);
   let x,y;
-  if(side===0){ x=Math.random()*canvas.width; y=-30; }
-  if(side===1){ x=canvas.width+30; y=Math.random()*canvas.height; }
-  if(side===2){ x=Math.random()*canvas.width; y=canvas.height+30; }
-  if(side===3){ x=-30; y=Math.random()*canvas.height; }
+  if (side===0){ x=Math.random()*canvas.width; y=-30; }
+  if (side===1){ x=canvas.width+30; y=Math.random()*canvas.height; }
+  if (side===2){ x=Math.random()*canvas.width; y=canvas.height+30; }
+  if (side===3){ x=-30; y=Math.random()*canvas.height; }
   enemies.push({x,y,w:24,h:24,s:1.6});
 }
 function updatePlayer(){
-  if(joystick.active){
+  if (joystick.active){
     const mag = Math.hypot(joystick.dx, joystick.dy);
-    if(mag>2){
+    if (mag>2){
       player.x += (joystick.dx/mag) * player.speed;
       player.y += (joystick.dy/mag) * player.speed;
     }
@@ -268,10 +232,9 @@ function updateEnemies(){
   });
 }
 
-/* ---- ENEMY‑ENEMY COLLISION & KILL EFFECT ---- */
+/* ---------- ENEMY‑ENEMY COLLISION & KILL EFFECT ---------- */
 function handleEnemyCollisions(){
   const toRemove = new Set();
-
   for (let i=0;i<enemies.length;i++){
     for (let j=i+1;j<enemies.length;j++){
       const a=enemies[i], b=enemies[j];
@@ -304,63 +267,59 @@ function drawKillEffects(){
   ctx.globalAlpha = 1;
 }
 
-/* ---------- DRAW HEALTH BAR (top‑center of the canvas) ---------- */
+/* ---------- DRAW HEALTH BAR ---------- */
 function drawHealthBar(){
-  if (!showHealthBar) return;          // nothing to draw
+  if (!showHealthBar) return;
+  const barW = 200, barH = 20;
+  const x = (canvas.width - barW) / 2;
+  const y = 12;
 
-  const barW = 200;                     // total width of the bar (px)
-  const barH = 20;                      // height (px)
-  const x    = (canvas.width - barW) / 2;   // centre horizontally
-  const y    = 12;                      // a little margin from the top
-
-  // ---- background (dark grey) ----
+  // background (dark grey)
   ctx.fillStyle = '#555';
   ctx.fillRect(x, y, barW, barH);
 
-  // ---- current health (green) ----
+  // current health (green)
   const curW = (playerHealth / MAX_HEALTH) * barW;
   ctx.fillStyle = '#0f0';
   ctx.fillRect(x, y, curW, barH);
 
-  // ---- white border ----
+  // white border
   ctx.strokeStyle = '#fff';
-  ctx.lineWidth   = 2;
+  ctx.lineWidth = 2;
   ctx.strokeRect(x, y, barW, barH);
 }
 
-/* ---- PLAYER‑ENEMY COLLISION (game over) ---- */
+/* ---------- DAMAGE CHECK (only after health bar appears) ---------- */
+function damagePlayer(delta){
+  // 1️⃣  No damage before the bar exists
+  if (!showHealthBar) return;
+
+  // 2️⃣  Immunity timer
+  if (playerInvuln > 0){
+    playerInvuln -= delta;
+    return;
+  }
+
+  // 3️⃣  Collision → lose 1 HP, start immunity, flash red
+  for (const e of enemies){
+    if (player.x < e.x+e.w && player.x+player.w > e.x &&
+        player.y < e.y+e.h && player.y+player.h > e.y){
+      playerHealth--;
+      playerInvuln   = INVULN_TIME;
+      player.flashTimer = INVULN_TIME;   // visual flash
+      break;                               // only one hit per frame
+    }
+  }
+}
+
+/* ---------- SIMPLE COLLIDE (instant death before the king) ---------- */
 function collide(){
   return enemies.some(e=>
     player.x < e.x+e.w && player.x+player.w > e.x &&
     player.y < e.y+e.h && player.y+player.h > e.y);
 }
 
-/* ---------- DAMAGE CHECK (called each frame) ---------- */
-function damagePlayer(delta){
-  // 1️⃣  Do nothing until the health bar exists
-  if (!showHealthBar) return;
-
-  // 2️⃣  If we are currently immune, just count down the timer
-  if (playerInvuln > 0){
-    playerInvuln -= delta;
-    return;
-  }
-
-  // 3️⃣  Test collision with every enemy
-  for (const e of enemies){
-    if (player.x < e.x+e.w && player.x+player.w > e.x &&
-        player.y < e.y+e.h && player.y+player.h > e.y){
-
-      // ----- we got hit! -----
-      playerHealth--;               // lose one HP
-      playerInvuln = INVULN_TIME;  // start the short invulnerability period
-      player.flashTimer = INVULN_TIME;
-      break;                        // only one hit per frame
-    }
-  }
-}
-
-/* ==== 2️⃣ DOOR / ROOM SWITCHING ==== */
+/* ---------- DOOR / ROOM SWITCHING ---------- */
 function checkDoorCollision(){
   for (const d of currentRoom.doors){
     const unlocked = (!d.requiredKills) || (kills >= d.requiredKills);
@@ -373,6 +332,7 @@ function checkDoorCollision(){
 
     if (inside){
       const targetRoom = rooms[d.target];
+      // centre player in the new room
       player.x = canvas.width/2 - player.w/2;
       player.y = canvas.height/2 - player.h/2;
       enemies = []; lastSpawn = 0;
@@ -380,16 +340,16 @@ function checkDoorCollision(){
 
       if (currentRoom === rooms.buildingC) maybePlaceKing();
       if (currentRoom === rooms.world) maybeAddBuildingC();
-      if (currentRoom === rooms.world){
-    // player left the castle – allow a fresh talk next time
-    king.talked = false;      // <-- NEW (optional, but safe)
-}
+
+      // leaving the world → reset king.talked so you can talk again later
+      if (currentRoom === rooms.world) king.talked = false;
+
       return;
     }
   }
 }
 
-/* ==== add BUILDING C ==== */
+/* ---------- BUILDING C (castle) UNLOCK ---------- */
 function maybeAddBuildingC(){
   if (buildingCAdded) return;
   if (kills < 10) return;
@@ -401,43 +361,64 @@ function maybeAddBuildingC(){
   buildingCAdded = true;
 }
 
-/* ==== POSITION THE KING (first time we enter castle) ==== */
+/* ---------- POSITION THE KING (first time you enter the castle) ---------- */
 function maybePlaceKing(){
   if (king.placed) return;
-  king.x = canvas.width/2 - king.w/2;
-  king.y = canvas.height/2 - king.h/2 - 250;
+  // Fixed coordinates – you can tweak these values to move the king around
+  king.x = canvas.width/2 - king.w/2;          // centre horizontally
+  king.y = canvas.height/2 - king.h/2 - 250;   // a bit above centre
   king.placed = true;
 }
 
-/* ==== 1️⃣ ROOMS DEFINITION ==== */
+/* ---------- ROOMS DEFINITION ---------- */
 const rooms = {
-  world:{ name:"World", bg:"#4caf50", doors:[
-      {x:30, y:540, w:80, h:80, target:"buildingA", emoji:"🏠"},
-      {x:380, y:20, w:80, h:80, target:"buildingB", emoji:"🏢"}
-    ], spawnEnemy(){ } },
+  world:{
+    name:"World",
+    bg:"#4caf50",
+    doors:[
+      {x:30,  y:540, w:80, h:80, target:"buildingA", emoji:"🏠"},
+      {x:380, y:20,  w:80, h:80, target:"buildingB", emoji:"🏢"}
+    ],
+    spawnEnemy(){ }
+  },
 
-  buildingA:{ name:"Building A", bg:"#8b4513", doors:[
+  buildingA:{
+    name:"Building A",
+    bg:"#8b4513",
+    doors:[
       {x:200, y:660, w:80, h:80, target:"world", emoji:"🚪"}
-    ], spawnEnemy(){},
+    ],
+    spawnEnemy(){},
     decor:[
       {x:150, y:300, emoji:"🪑"},
       {x:230, y:300, emoji:"🪑"},
       {x:190, y:460, emoji:"🛏️"}
-    ] },
+    ]
+  },
 
-  buildingB:{ name:"Building B", bg:"#3b5998", doors:[
+  buildingB:{
+    name:"Building B",
+    bg:"#3b5998",
+    doors:[
       {x:200, y:20, w:80, h:80, target:"world", emoji:"🚪",
        lockedEmoji:"🔒", requiredKills:10, showLock:true}
-    ], spawnEnemy(){ spawnEnemy(); } },
+    ],
+    spawnEnemy(){ spawnEnemy(); }
+  },
 
-  buildingC:{ name:"Building C", bg:"#d1e8f0", doors:[
+  buildingC:{
+    name:"Building C",
+    bg:"#d1e8f0",
+    doors:[
       {x:200, y:660, w:80, h:80, target:"world", emoji:"🚪"}
-    ], spawnEnemy(){ } }
+    ],
+    spawnEnemy(){ }
+  }
 };
 
 let currentRoom = rooms.world;
 
-/* ==== 3️⃣ DRAW ==== */
+/* ---------- DRAW EVERYTHING ---------- */
 function draw(){
   /* background */
   ctx.fillStyle = currentRoom.bg;
@@ -471,24 +452,18 @@ function draw(){
     }
   });
 
-  /* room‑specific decor */
+  /* room‑specific decor (tables, chairs, bed) */
   if (currentRoom.decor && currentRoom.decor.length){
     ctx.font='36px Arial'; ctx.fillStyle='#fff';
     currentRoom.decor.forEach(item=> ctx.fillText(item.emoji, item.x, item.y));
   }
 
-  /* player */
+  /* player – flash red while timer > 0 */
   ctx.font='30px Arial';
-  // If we are flashing, draw the player in red; otherwise white
-  if (player.flashTimer > 0){
-    ctx.fillStyle = '#f44';
-    player.flashTimer -= delta;   // delta comes from the loop (you may need to pass it)
-  }else{
-    ctx.fillStyle = '#fff';
-  }
+  ctx.fillStyle = (player.flashTimer > 0) ? '#f44' : '#fff';
   ctx.fillText('🧿', player.x+player.w/2, player.y+player.h/2);
 
-  /* king – only in the castle */
+  /* king – only visible inside the castle */
   if (currentRoom === rooms.buildingC){
     ctx.font='48px Arial'; ctx.fillStyle='#ffde59';
     ctx.fillText(king.emoji, king.x+king.w/2, king.y+king.h/2);
@@ -507,87 +482,94 @@ function draw(){
     ctx.arc(joystick.baseX+joystick.dx, joystick.baseY+joystick.dy, 20, 0, Math.PI*2);
     ctx.fill();
   }
-/* draw the health bar on top of everything */
-drawHealthBar();
+
+  /* health bar – on top of everything */
+  drawHealthBar();
 }
 
-/* ==== 4️⃣ MAIN LOOP ==== */
+/* ---------- MAIN LOOP ---------- */
 function loop(timestamp){
   if (!running) return;
+
   if (gamePaused){
     anim = requestAnimationFrame(loop);
     return;
   }
+
   const delta = timestamp - lastTime;
   lastTime = timestamp;
 
+  // flash timer decays here (so draw() can simply check the value)
+  if (player.flashTimer > 0) player.flashTimer -= delta;
+
   document.getElementById('score').textContent = kills;
 
-  if (timestamp - lastSpawn > 1200) { currentRoom.spawnEnemy(); lastSpawn = timestamp; }
+  if (timestamp - lastSpawn > 1200){
+    currentRoom.spawnEnemy();
+    lastSpawn = timestamp;
+  }
 
-  updatePlayer(); updateEnemies(); handleEnemyCollisions();
+  updatePlayer();
+  updateEnemies();
+  handleEnemyCollisions();
   updateKillEffects(delta);
-  // ---- DAMAGE: choose the rule set depending on whether the bar is active ----
+  checkDoorCollision();
+
+  // ---------- DAMAGE handling ----------
   if (showHealthBar){
-    // after the king → health‑based damage
+    // health‑based damage after the king
     damagePlayer(delta);
   }else{
-    // before the king → instantaneous death on any touch (old behaviour)
+    // instant death before the health bar appears
     if (collide()){
-      // --- GAME OVER (same as the block later) -----------------
+      // --- GAME OVER (pre‑king) ---------------------------------
       running = false;
       cancelAnimationFrame(anim);
       document.getElementById('final').innerHTML = `You scored ${kills}. <br>Hint: You need certain points to proceed in the game.`;
       document.getElementById('overlay').style.display = 'flex';
       recordPlaySession(playerName, kills);
-      // hide the health bar just in case (it isn’t shown yet)
-      showHealthBar = false;
-      playerHealth   = 0;
       return;
     }
   }
 
-  checkDoorCollision(); draw(); drawKillEffects();
- // ---- KING PROXIMITY -------------------------------------------------
-if (currentRoom === rooms.buildingC && !king.active){
-  const talkRange = 80;                     // pixels from king's centre
-  const cx = king.x + king.w/2;
-  const cy = king.y + king.h/2;
-  const px = player.x + player.w/2;
-  const py = player.y + player.h/2;
-  const dist = Math.hypot(cx-px, cy-py);
+  draw();               // draw everything (including health bar)
+  drawKillEffects();    // flashing ⚔️ effect
 
-  // ---- 1️⃣ START DIALOGUE ONLY IF we haven't talked yet ----
-  if (dist < talkRange && !king.talked){
-    king.active = true;
-    startKingDialogue();                    // show the UI
-  }
+  // ---------- KING PROXIMITY (to start dialogue) ----------
+  if (currentRoom === rooms.buildingC && !king.active){
+    const talkRange = 80;
+    const cx = king.x + king.w/2;
+    const cy = king.y + king.h/2;
+    const px = player.x + player.w/2;
+    const py = player.y + player.h/2;
+    const dist = Math.hypot(cx-px, cy-py);
 
-  // ---- 2️⃣ RESET the “talked” flag when we walk away ---------
-  // (so the player can talk again after exiting and re‑entering)
-  if (dist >= talkRange){
-    king.talked = false;
-  }
-}
-
-    // ---- END OF GAME when health reaches zero (only after the bar exists) ----
-    if (showHealthBar && playerHealth <= 0){
-      running = false;
-      cancelAnimationFrame(anim);
-      document.getElementById('final').innerHTML = `You scored ${kills}. <br>Hint: You need certain points to proceed in the game.`;
-      document.getElementById('overlay').style.display = 'flex';
-      pushScore(playerName, kills);
-
-      // hide the health bar now that we’re dead
-      showHealthBar = false;
-      playerHealth   = 0;
-
-      return;
+    if (dist < talkRange && !king.talked){
+      king.active = true;
+      startKingDialogue();
     }
+
+    // reset “talked” flag when the player steps away – lets them talk again later
+    if (dist >= talkRange) king.talked = false;
+  }
+
+  // ---------- END‑OF‑GAME (health‑based) ----------
+  if (showHealthBar && playerHealth <= 0){
+    running = false;
+    cancelAnimationFrame(anim);
+    document.getElementById('final').innerHTML = `You scored ${kills}. <br>Hint: You need certain points to proceed in the game.`;
+    document.getElementById('overlay').style.display = 'flex';
+    recordPlaySession(playerName, kills);
+    // hide UI & clear timers
+    showHealthBar = false;
+    playerInvuln = 0;
+    return;
+  }
+
   anim = requestAnimationFrame(loop);
 }
 
-/* ==== START / RESTART ==== */
+/* ---------- START / RESTART ---------- */
 function startGame(){
   if (!playerName) askForName();
   document.getElementById('overlay').style.display = 'none';
@@ -596,7 +578,36 @@ function startGame(){
   requestAnimationFrame(loop);
 }
 
-/* ---- JOYSTICK INPUT ---- */
+/* ---------- DIALOGUE HELPERS ---------- */
+function startKingDialogue(){
+  document.getElementById('dialogueLine').textContent = king.dialogueLines[0];
+  king.currentLine = 0;
+  document.getElementById('dialogueBox').style.display = 'flex';
+  dlgBtn.textContent = 'Next';
+  gamePaused = true;
+  king.talked = true;       // we have just started a conversation
+}
+function advanceKingDialogue(){
+  king.currentLine++;
+
+  // conversation finished → close UI and give the player health
+  if (king.currentLine >= king.dialogueLines.length){
+    document.getElementById('dialogueBox').style.display = 'none';
+    gamePaused = false;
+    king.active = false;
+    dlgBtn.textContent = 'Next';
+
+    showHealthBar = true;
+    playerHealth  = MAX_HEALTH;   // full health again
+    return;
+  }
+
+  // otherwise show next line
+  document.getElementById('dialogueLine').textContent = king.dialogueLines[king.currentLine];
+  dlgBtn.textContent = (king.currentLine === king.dialogueLines.length-1) ? 'Close' : 'Next';
+}
+
+/* ---------- JOYSTICK INPUT ---------- */
 function pos(e){
   const r = canvas.getBoundingClientRect();
   return {
@@ -619,25 +630,28 @@ canvas.addEventListener('pointermove', e=>{
   if (d > joystick.max){ dx = dx/d * joystick.max; dy = dy/d * joystick.max; }
   joystick.dx = dx; joystick.dy = dy;
 });
-canvas.addEventListener('pointerup',()=>{ joystick.active=false; joystick.dx=0; joystick.dy=0; });
+canvas.addEventListener('pointerup',   ()=>{ joystick.active=false; joystick.dx=0; joystick.dy=0; });
 canvas.addEventListener('pointercancel',()=>{ joystick.active=false; });
 
-/* ---- KEEP CANVAS ASPECT RATIO ---- */
+/* ---------- KEEP CANVAS ASPECT RATIO ---------- */
 function resize(){
   const maxW = Math.min(window.innerWidth,540);
-  canvas.style.width  = maxW+'px';
-  canvas.style.height = (maxW * 1170 / 540)+'px';
+  canvas.style.width  = maxW + 'px';
+  canvas.style.height = (maxW * 1170 / 540) + 'px';
 }
 window.addEventListener('resize', resize);
 resize();
 
-/* ==== PAGE LOAD ==== */
+/* ---------- PAGE LOAD ---------- */
 window.addEventListener('load', async ()=>{
   const stored = localStorage.getItem('survivalPlayerName');
-  if (stored){ playerName = stored; document.getElementById('playerName').textContent = playerName; }
+  if (stored){
+    playerName = stored;
+    document.getElementById('playerName').textContent = playerName;
+  }
   await refreshLeaderboard();
 
-  // hide the dialogue box and grab the button (now it exists)
+  // hide the dialogue box (it’s now in the DOM) and hook the button
   document.getElementById('dialogueBox').style.display = 'none';
   dlgBtn = document.getElementById('dialogueNext');
   dlgBtn.addEventListener('click', advanceKingDialogue);
@@ -645,16 +659,16 @@ window.addEventListener('load', async ()=>{
   startGame();
 });
 
-/* ---- OPTIONAL SERVICE‑WORKER ---- */
-if('serviceWorker' in navigator){
+/* ---------- OPTIONAL SERVICE‑WORKER ---------- */
+if ('serviceWorker' in navigator){
   navigator.serviceWorker.register('sw.js')
     .catch(e=>console.warn('SW registration failed',e));
 }
 
-/* ---- PLAY AGAIN BUTTON ---- */
+/* ---------- PLAY AGAIN BUTTON ---------- */
 document.getElementById('retry').addEventListener('click', startGame);
 
-/* ----- OPTIONAL: keep the E‑key as a fallback (you can delete) ----- */
+/* ---------- OPTIONAL: “E” key as a fallback for dialogue ---------- */
 window.addEventListener('keydown', e=>{
   if ((e.key === 'e' || e.key === 'E') &&
       document.getElementById('dialogueBox').style.display !== 'none'){
