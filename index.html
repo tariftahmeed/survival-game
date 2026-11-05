@@ -96,6 +96,10 @@ let gamePaused = false;        // pause while dialogue is shown
 const MAX_HEALTH   = 3;            // you can raise this if you want more “HP”
 let playerHealth   = MAX_HEALTH;    // current HP – starts full but hidden
 let showHealthBar  = false;        // true → draw the bar
+
+/* DAMAGE SETTINGS */
+const INVULN_TIME = 800; // milliseconds of immunity after a hit
+let playerInvuln = 0; // counts down while the player is immune
       
 /* ---------- KING NPC (inside buildingC) ---------- */
 let king = {
@@ -210,7 +214,17 @@ function askForName(){
 }
 
 /* ---- BASIC GAME SETUP ---- */
-function reset(){ player={x:220, y:330, w:30, h:30, speed:4.5}; enemies=[]; kills = 0; }
+function reset(){
+      player={x:220, y:330, w:30, h:30, speed:4.5};
+      enemies=[];
+      kills = 0;
+
+      // restore full health and hide the bar on fresh start
+      playerHealth = MAX_HEALTH;
+      showHealthBar = false;
+      playerInvuln = 0;
+}
+
 function spawnEnemy(){
   const side = Math.floor(Math.random()*4);
   let x,y;
@@ -306,6 +320,30 @@ function collide(){
   return enemies.some(e=>
     player.x < e.x+e.w && player.x+player.w > e.x &&
     player.y < e.y+e.h && player.y+player.h > e.y);
+}
+
+/* ---------- DAMAGE CHECK (called each frame) ---------- */
+function damagePlayer(delta){
+  // 1️⃣  Do nothing until the health bar exists
+  if (!showHealthBar) return;
+
+  // 2️⃣  If we are currently immune, just count down the timer
+  if (playerInvuln > 0){
+    playerInvuln -= delta;
+    return;
+  }
+
+  // 3️⃣  Test collision with every enemy
+  for (const e of enemies){
+    if (player.x < e.x+e.w && player.x+player.w > e.x &&
+        player.y < e.y+e.h && player.y+player.h > e.y){
+
+      // ----- we got hit! -----
+      playerHealth--;               // lose one HP
+      playerInvuln = INVULN_TIME;  // start the short invulnerability period
+      break;                        // only one hit per frame
+    }
+  }
 }
 
 /* ==== 2️⃣ DOOR / ROOM SWITCHING ==== */
@@ -467,8 +505,28 @@ function loop(timestamp){
   if (timestamp - lastSpawn > 1200) { currentRoom.spawnEnemy(); lastSpawn = timestamp; }
 
   updatePlayer(); updateEnemies(); handleEnemyCollisions();
-  updateKillEffects(delta); checkDoorCollision(); draw(); drawKillEffects();
+  updateKillEffects(delta);
+  // ---- DAMAGE: choose the rule set depending on whether the bar is active ----
+  if (showHealthBar){
+    // after the king → health‑based damage
+    damagePlayer(delta);
+  }else{
+    // before the king → instantaneous death on any touch (old behaviour)
+    if (collide()){
+      // --- GAME OVER (same as the block later) -----------------
+      running = false;
+      cancelAnimationFrame(anim);
+      document.getElementById('final').innerHTML = `You scored ${kills}. <br>Hint: You need certain points to proceed in the game.`;
+      document.getElementById('overlay').style.display = 'flex';
+      pushScore(playerName, kills);
+      // hide the health bar just in case (it isn’t shown yet)
+      showHealthBar = false;
+      playerHealth   = 0;
+      return;
+    }
+  }
 
+  checkDoorCollision(); draw(); drawKillEffects();
  // ---- KING PROXIMITY -------------------------------------------------
 if (currentRoom === rooms.buildingC && !king.active){
   const talkRange = 80;                     // pixels from king's centre
@@ -491,20 +549,20 @@ if (currentRoom === rooms.buildingC && !king.active){
   }
 }
 
-    if (collide()){
-    running = false;
-    cancelAnimationFrame(anim);
-    document.getElementById('final').innerHTML = `You scored ${kills}. <br>Hint: You need certain points to proceed in the game.`;
-    document.getElementById('overlay').style.display = 'flex';
-    pushScore(playerName, kills);
+    // ---- END OF GAME when health reaches zero (only after the bar exists) ----
+    if (showHealthBar && playerHealth <= 0){
+      running = false;
+      cancelAnimationFrame(anim);
+      document.getElementById('final').innerHTML = `You scored ${kills}. <br>Hint: You need certain points to proceed in the game.`;
+      document.getElementById('overlay').style.display = 'flex';
+      pushScore(playerName, kills);
 
-    // <<<--- NEW: hide health bar on death -----------------
-    showHealthBar = false;
-    playerHealth   = 0;
-    // -----------------------------------------------------
+      // hide the health bar now that we’re dead
+      showHealthBar = false;
+      playerHealth   = 0;
 
-    return;
-  }
+      return;
+    }
   anim = requestAnimationFrame(loop);
 }
 
