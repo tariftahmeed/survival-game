@@ -37,9 +37,11 @@ let king = {
   w:40, h:60,
   emoji:'🤴',
   dialogueLines:[
-    "Welcome, brave hero!",
     "Your deeds have echoed across the realm.",
-    "Take this gift and continue your quest."
+    "Take this gift and continue your quest.",
+    "This castle will remain open for you.",
+    "Come back whenever you need to recharge.",
+    "If you disappoint, your journey shall start again."
   ],
   currentLine:0,
   active:false,          // true while the UI is open
