@@ -1,7 +1,10 @@
 /* --------------------------------------------------------------
-   IMPORTS – Firebase CDN (still works in a module)
+   IMPORTS: FIREBASE CDN
 -------------------------------------------------------------- */
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js";
+
+import { initializeApp } from
+  "https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js";
+
 import {
   getFirestore,
   collection,
@@ -11,434 +14,1701 @@ import {
   orderBy,
   limit,
   serverTimestamp
-} from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
+} from
+  "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
 
-/* --------------------------------------------------------------
-   OPTIONAL: import the config we stored separately
--------------------------------------------------------------- */
 import { firebaseConfig } from "./firebase-config.js";
 
+
 /* --------------------------------------------------------------
-   GLOBALS
+   FIREBASE SETUP
 -------------------------------------------------------------- */
-let dlgBtn;                     // will be set after the page loads
-let gamePaused = false;         // pause while dialogue is shown
 
-/* ---------- PLAYER & HEALTH SETTINGS ---------- */
-const MAX_HEALTH   = 3;                 // you can raise this if you like
-let playerHealth   = MAX_HEALTH;       // current HP (starts full but hidden)
-let showHealthBar  = false;            // true → draw the bar
-const INVULN_TIME = 800;               // ms of immunity after a hit
-let playerInvuln   = 0;                 // counts down while immune
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const scoresCol = collection(db, "survivalScores");
 
-/* ---------- KING NPC (inside buildingC) ---------- */
-let king = {
-  x:0, y:0,
-  w:40, h:60,
-  emoji:'🤴',
-  dialogueLines:[
+
+/* --------------------------------------------------------------
+   CANVAS
+-------------------------------------------------------------- */
+
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+
+/* --------------------------------------------------------------
+   GAME STATE
+-------------------------------------------------------------- */
+
+let player;
+let enemies = [];
+let killEffects = [];
+
+let kills = 0;
+let lastSpawn = 0;
+let lastTime = 0;
+
+let running = false;
+let gamePaused = false;
+let pageHidden = false;
+
+let anim = null;
+
+let playerName = "";
+let dlgBtn = null;
+
+
+/* --------------------------------------------------------------
+   BUILDING UNLOCK STATE
+-------------------------------------------------------------- */
+
+let buildingCAdded = false;
+let buildingDAdded = false;
+
+
+/* --------------------------------------------------------------
+   PLAYER HEALTH SETTINGS
+-------------------------------------------------------------- */
+
+const MAX_HEALTH = 3;
+const INVULN_TIME = 800;
+
+let playerHealth = MAX_HEALTH;
+let showHealthBar = false;
+let playerInvuln = 0;
+
+
+/* --------------------------------------------------------------
+   ENEMY SETTINGS
+-------------------------------------------------------------- */
+
+const NORMAL_ENEMY_SPAWN_INTERVAL = 1200;
+const GERM_ENEMY_SPAWN_INTERVAL = 1500;
+
+const NORMAL_ENEMY_SIZE = 24;
+const NORMAL_ENEMY_SPEED = 1.6;
+
+const GERM_START_SIZE = 28;
+const GERM_MAX_SIZE = 90;
+const GERM_START_SPEED = 1.35;
+const GERM_START_HEALTH = 2;
+
+
+/* --------------------------------------------------------------
+   JOYSTICK
+-------------------------------------------------------------- */
+
+let joystick = {
+  active: false,
+  baseX: 0,
+  baseY: 0,
+  dx: 0,
+  dy: 0,
+  max: 60
+};
+
+
+/* --------------------------------------------------------------
+   KING NPC
+-------------------------------------------------------------- */
+
+const king = {
+  x: 0,
+  y: 0,
+  w: 40,
+  h: 60,
+
+  emoji: "🤴",
+
+  dialogueLines: [
     "Your deeds have echoed across the realm.",
     "Take this gift and continue your quest.",
     "This castle will remain open for you.",
     "Come back whenever you need to recharge.",
     "If you disappoint, your journey shall start again."
   ],
-  currentLine:0,
-  active:false,          // true while the UI is open
-  placed:false,          // true after we have positioned the king
-  talked:false           // have we already finished a conversation?
+
+  currentLine: 0,
+  active: false,
+  placed: false,
+  talked: false
 };
 
-/* ---------- INITIALISE FIREBASE & FIRESTORE ---------- */
-const app   = initializeApp(firebaseConfig);
-const db    = getFirestore(app);
-const scoresCol = collection(db, "survivalScores");
 
-/* ---------- RECORD A PLAY SESSION (with timestamp) ---------- */
-async function recordPlaySession(name, kills){
-  try{
+/* --------------------------------------------------------------
+   FIREBASE: RECORD PLAY SESSION
+-------------------------------------------------------------- */
+
+async function recordPlaySession(name, score) {
+  try {
     await addDoc(scoresCol, {
       name,
-      score: kills,
+      score,
       playedAt: serverTimestamp()
     });
-  }catch(e){
-    console.warn('Failed to write play session:', e);
+  } catch (error) {
+    console.warn("Failed to write play session:", error);
   }
 }
 
-/* ---------- FETCH TOP‑3 FOR LEADERBOARD ---------- */
-async function fetchTop3(){
-  const q    = query(scoresCol, orderBy("score","desc"), limit(3));
-  const snap = await getDocs(q);
-  const list = [];
-  snap.forEach(doc=>{
-    const d = doc.data();
-    list.push({name:d.name, score:d.score});
-  });
-  return list;
-}
 
-/* ---------- REFRESH LEADERBOARD UI ---------- */
-async function refreshLeaderboard(){
-  const top = await fetchTop3();
-  const ol  = document.getElementById('topList');
-  ol.innerHTML = "";
-  top.forEach(entry=>{
-    const li = document.createElement('li');
-    li.textContent = `${entry.name}: ${entry.score}`;
-    ol.appendChild(li);
-  });
-}
+/* --------------------------------------------------------------
+   FIREBASE: FETCH TOP 3
+-------------------------------------------------------------- */
 
-/* ---------- CANVAS & CONTEXT ---------- */
-const canvas = document.getElementById('game');
-const ctx    = canvas.getContext('2d');
-
-/* ---------- GAME STATE ---------- */
-let player, enemies = [], kills = 0, lastSpawn = 0, running = false, anim;
-let playerName = '';
-let joystick = {active:false, baseX:0, baseY:0, dx:0, dy:0, max:60};
-let lastTime = 0;
-let buildingCAdded = false;
-
-/* ---------- PLAYER NAME (local storage) ---------- */
-function askForName(){
-  const stored = localStorage.getItem('survivalPlayerName');
-  if (stored){
-    playerName = stored;
-  }else{
-    let name = '';
-    while(!name){
-      name = prompt('Enter your name (will appear on the global leaderboard)');
-    }
-    playerName = name.trim();
-    localStorage.setItem('survivalPlayerName', playerName);
-  }
-  document.getElementById('playerName').textContent = playerName;
-}
-
-/* ---------- BASIC GAME SETUP ---------- */
-function reset(){
-  player = {x:220, y:330, w:30, h:30, speed:4.5};
-  enemies = [];
-  kills   = 0;
-
-  // health & UI reset
-  playerHealth   = MAX_HEALTH;
-  showHealthBar  = false;
-  playerInvuln   = 0;
-  player.flashTimer = 0;
-}
-
-/* ---------- ENEMY SPAWN ---------- */
-function spawnEnemy(){
-  const side = Math.floor(Math.random()*4);
-  let x,y;
-  if (side===0){ x=Math.random()*canvas.width;  y=-30; }
-  if (side===1){ x=canvas.width+30;            y=Math.random()*canvas.height; }
-  if (side===2){ x=Math.random()*canvas.width; y=canvas.height+30; }
-  if (side===3){ x=-30;                       y=Math.random()*canvas.height; }
-  enemies.push({x,y,w:24,h:24,s:1.6});
-}
-
-/* ---------- UPDATE PLAYER (joystick) ---------- */
-function updatePlayer(){
-  if (joystick.active){
-    const mag = Math.hypot(joystick.dx, joystick.dy);
-    if (mag>2){
-      player.x += (joystick.dx/mag) * player.speed;
-      player.y += (joystick.dy/mag) * player.speed;
-    }
-  }
-  // keep inside canvas
-  player.x = Math.max(0, Math.min(canvas.width-player.w, player.x));
-  player.y = Math.max(0, Math.min(canvas.height-player.h, player.y));
-}
-
-/* ---------- UPDATE ENEMIES (chase player) ---------- */
-function updateEnemies(){
-  enemies.forEach(e=>{
-    const dx = player.x - e.x,
-          dy = player.y - e.y,
-          d  = Math.hypot(dx,dy) || 1;
-    e.x += (dx/d) * e.s;
-    e.y += (dy/d) * e.s;
-  });
-}
-
-/* ---------- ENEMY‑ENEMY COLLISIONS & KILL EFFECT ---------- */
-function handleEnemyCollisions(){
-  const toRemove = new Set();
-  for (let i=0;i<enemies.length;i++){
-    for (let j=i+1;j<enemies.length;j++){
-      const a=enemies[i], b=enemies[j];
-      if (a.x < b.x+b.w && a.x+a.w > b.x &&
-          a.y < b.y+b.h && a.y+a.h > b.y){
-        toRemove.add(i); toRemove.add(j);
-        const midX = (a.x + b.x) / 2 + a.w / 2;
-        const midY = (a.y + b.y) / 2 + a.h / 2;
-        killEffects.push({x:midX, y:midY, ttl:200});
-      }
-    }
-  }
-  kills += Math.floor(toRemove.size/2);
-  enemies = enemies.filter((_,i)=>!toRemove.has(i));
-}
-
-/* ---------- KILL‑EFFECTS (flashing ⚔️) ---------- */
-let killEffects = [];  // {x,y,ttl}
-function updateKillEffects(delta){
-  killEffects.forEach(e=> e.ttl -= delta);
-  killEffects = killEffects.filter(e=> e.ttl>0);
-}
-function drawKillEffects(){
-  ctx.font = '32px Arial';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#ff4444';
-  killEffects.forEach(e=>{
-    ctx.globalAlpha = Math.max(0, e.ttl/200);
-    ctx.fillText('⚔️', e.x, e.y);
-  });
-  ctx.globalAlpha = 1;
-}
-
-/* ---------- DRAW HEALTH BAR ---------- */
-function drawHealthBar(){
-  if (!showHealthBar) return;
-  const barW = 200, barH = 20;
-  const x = (canvas.width - barW) / 2;
-  const y = 12;
-
-  // background
-  ctx.fillStyle = '#555';
-  ctx.fillRect(x, y, barW, barH);
-
-  // current health
-  const curW = (playerHealth / MAX_HEALTH) * barW;
-  ctx.fillStyle = '#0f0';
-  ctx.fillRect(x, y, curW, barH);
-
-  // border
-  ctx.strokeStyle = '#fff';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(x, y, barW, barH);
-}
-
-/* ---------- DAMAGE CHECK (after health bar appears) ---------- */
-function damagePlayer(delta){
-  if (!showHealthBar) return;        // nothing before the bar appears
-  if (playerInvuln > 0){              // immunity timer
-    playerInvuln -= delta;
-    return;
-  }
-
-  // collision → lose 1 HP, start immunity, flash red
-  for (const e of enemies){
-    if (player.x < e.x+e.w && player.x+player.w > e.x &&
-        player.y < e.y+e.h && player.y+player.h > e.y){
-      playerHealth--;
-      playerInvuln   = INVULN_TIME;
-      player.flashTimer = INVULN_TIME;   // visual flash
-      break;                            // only one hit per frame
-    }
-  }
-}
-
-/* ---------- SIMPLE COLLIDE (instant death before health bar) ---------- */
-function collide(){
-  return enemies.some(e=>
-    player.x < e.x+e.w && player.x+player.w > e.x &&
-    player.y < e.y+e.h && player.y+player.h > e.y);
-}
-
-/* ---------- DOOR / ROOM SWITCHING ---------- */
-function checkDoorCollision(){
-  for (const d of currentRoom.doors){
-    const unlocked = (!d.requiredKills) || (kills >= d.requiredKills);
-    if (!unlocked) continue;
-
-    const inside = (
-      player.x < d.x+d.w && player.x+player.w > d.x &&
-      player.y < d.y+d.h && player.y+player.h > d.y
+async function fetchTop3() {
+  try {
+    const scoresQuery = query(
+      scoresCol,
+      orderBy("score", "desc"),
+      limit(3)
     );
 
-    if (inside){
-      const targetRoom = rooms[d.target];
-      // centre player in the new room
-      player.x = canvas.width/2 - player.w/2;
-      player.y = canvas.height/2 - player.h/2;
-      enemies = []; lastSpawn = 0;
-      currentRoom = targetRoom;
+    const snapshot = await getDocs(scoresQuery);
+    const list = [];
 
-      if (currentRoom === rooms.buildingC) maybePlaceKing();
-      if (currentRoom === rooms.world) maybeAddBuildingC();
+    snapshot.forEach((scoreDocument) => {
+      const data = scoreDocument.data();
 
-      // when we go back to the world the king can be talked to again
-      if (currentRoom === rooms.world) king.talked = false;
+      list.push({
+        name: data.name,
+        score: data.score
+      });
+    });
 
-      return;
-    }
+    return list;
+  } catch (error) {
+    console.warn("Failed to fetch leaderboard:", error);
+    return [];
   }
 }
 
-/* ---------- BUILDING C (castle) UNLOCK ---------- */
-function maybeAddBuildingC(){
-  if (buildingCAdded) return;
-  if (kills < 10) return;
-  rooms.world.doors.push({
-    x:200, y:140, w:80, h:80,
-    target:"buildingC",
-    emoji:"🏰"
+
+/* --------------------------------------------------------------
+   FIREBASE: UPDATE LEADERBOARD
+-------------------------------------------------------------- */
+
+async function refreshLeaderboard() {
+  const topPlayers = await fetchTop3();
+  const leaderboard = document.getElementById("topList");
+
+  if (!leaderboard) return;
+
+  leaderboard.innerHTML = "";
+
+  topPlayers.forEach((entry) => {
+    const item = document.createElement("li");
+    item.textContent = `${entry.name}: ${entry.score}`;
+    leaderboard.appendChild(item);
   });
-  buildingCAdded = true;
 }
 
-/* ---------- POSITION THE KING (first time you enter the castle) ---------- */
-function maybePlaceKing(){
-  if (king.placed) return;
-  // Fixed coordinates – feel free to tweak them
-  king.x = canvas.width/2 - king.w/2;          // centre horizontally
-  king.y = canvas.height/2 - king.h/2 - 250;   // a bit above centre
-  king.placed = true;
+
+/* --------------------------------------------------------------
+   PLAYER NAME
+-------------------------------------------------------------- */
+
+function askForName() {
+  const storedName = localStorage.getItem("survivalPlayerName");
+
+  if (storedName) {
+    playerName = storedName;
+  } else {
+    let enteredName = "";
+
+    while (!enteredName.trim()) {
+      enteredName = prompt(
+        "Enter your name. It will appear on the global leaderboard."
+      ) || "";
+    }
+
+    playerName = enteredName.trim();
+
+    localStorage.setItem(
+      "survivalPlayerName",
+      playerName
+    );
+  }
+
+  const playerNameElement = document.getElementById("playerName");
+
+  if (playerNameElement) {
+    playerNameElement.textContent = playerName;
+  }
 }
 
-/* ---------- ROOMS DEFINITION ---------- */
+
+/* --------------------------------------------------------------
+   COLLISION HELPER
+-------------------------------------------------------------- */
+
+function rectanglesTouch(a, b) {
+  return (
+    a.x < b.x + b.w &&
+    a.x + a.w > b.x &&
+    a.y < b.y + b.h &&
+    a.y + a.h > b.y
+  );
+}
+
+
+/* --------------------------------------------------------------
+   RANDOM SPAWN POSITION
+-------------------------------------------------------------- */
+
+function getEdgeSpawnPosition(size) {
+  const side = Math.floor(Math.random() * 4);
+
+  let x = 0;
+  let y = 0;
+
+  if (side === 0) {
+    x = Math.random() * Math.max(1, canvas.width - size);
+    y = -size;
+  }
+
+  if (side === 1) {
+    x = canvas.width + size;
+    y = Math.random() * Math.max(1, canvas.height - size);
+  }
+
+  if (side === 2) {
+    x = Math.random() * Math.max(1, canvas.width - size);
+    y = canvas.height + size;
+  }
+
+  if (side === 3) {
+    x = -size;
+    y = Math.random() * Math.max(1, canvas.height - size);
+  }
+
+  return { x, y };
+}
+
+
+/* --------------------------------------------------------------
+   SPAWN NORMAL ENEMY
+-------------------------------------------------------------- */
+
+function spawnEnemy() {
+  const position = getEdgeSpawnPosition(
+    NORMAL_ENEMY_SIZE
+  );
+
+  enemies.push({
+    type: "normal",
+
+    x: position.x,
+    y: position.y,
+
+    w: NORMAL_ENEMY_SIZE,
+    h: NORMAL_ENEMY_SIZE,
+
+    s: NORMAL_ENEMY_SPEED
+  });
+}
+
+
+/* --------------------------------------------------------------
+   SPAWN GERM ENEMY
+-------------------------------------------------------------- */
+
+function spawnGermEnemy() {
+  const position = getEdgeSpawnPosition(
+    GERM_START_SIZE
+  );
+
+  enemies.push({
+    type: "germ",
+
+    x: position.x,
+    y: position.y,
+
+    w: GERM_START_SIZE,
+    h: GERM_START_SIZE,
+
+    s: GERM_START_SPEED,
+
+    health: GERM_START_HEALTH,
+    maxSize: GERM_MAX_SIZE
+  });
+}
+
+
+/* --------------------------------------------------------------
+   ROOM DEFINITIONS
+-------------------------------------------------------------- */
+
 const rooms = {
-  world:{
-    name:"World",
-    bg:"#4caf50",
-    doors:[
-      {x:30,  y:540, w:80, h:80, target:"buildingA", emoji:"🏠"},
-      {x:380, y:20,  w:80, h:80, target:"buildingB", emoji:"🏢"}
+  world: {
+    name: "World",
+    bg: "#4caf50",
+
+    doors: [
+      {
+        id: "buildingA",
+        x: 30,
+        y: 540,
+        w: 80,
+        h: 80,
+        target: "buildingA",
+        emoji: "🏠"
+      },
+
+      {
+        id: "buildingB",
+        x: 380,
+        y: 20,
+        w: 80,
+        h: 80,
+        target: "buildingB",
+        emoji: "🏢"
+      }
     ],
-    spawnEnemy(){ }
+
+    spawnEnemy() {}
   },
 
-  buildingA:{
-    name:"Building A",
-    bg:"#8b4513",
-    doors:[
-      {x:200, y:660, w:80, h:80, target:"world", emoji:"🚪"}
+  buildingA: {
+    name: "Building A",
+    bg: "#8b4513",
+
+    doors: [
+      {
+        x: 200,
+        y: 660,
+        w: 80,
+        h: 80,
+        target: "world",
+        emoji: "🚪"
+      }
     ],
-    spawnEnemy(){},
-    decor:[
-      {x:150, y:300, emoji:"🪑"},
-      {x:230, y:300, emoji:"🪑"},
-      {x:190, y:460, emoji:"🛏️"}
+
+    spawnEnemy() {},
+
+    decor: [
+      { x: 150, y: 300, emoji: "🪑" },
+      { x: 230, y: 300, emoji: "🪑" },
+      { x: 190, y: 460, emoji: "🛏️" }
     ]
   },
 
-  buildingB:{
-    name:"Building B",
-    bg:"#3b5998",
-    doors:[
-      {x:200, y:20, w:80, h:80, target:"world", emoji:"🚪",
-       lockedEmoji:"🔒", requiredKills:10, showLock:true}
+  buildingB: {
+    name: "Building B",
+    bg: "#3b5998",
+
+    doors: [
+      {
+        x: 200,
+        y: 20,
+        w: 80,
+        h: 80,
+        target: "world",
+        emoji: "🚪",
+
+        lockedEmoji: "🔒",
+        requiredKills: 10,
+        showLock: true
+      }
     ],
-    spawnEnemy(){ spawnEnemy(); }
+
+    spawnEnemy() {
+      spawnEnemy();
+    }
   },
 
-  buildingC:{
-    name:"Building C",
-    bg:"#d1e8f0",
-    doors:[
-      {x:200, y:660, w:80, h:80, target:"world", emoji:"🚪"}
+  buildingC: {
+    name: "Building C",
+    bg: "#d1e8f0",
+
+    doors: [
+      {
+        x: 200,
+        y: 660,
+        w: 80,
+        h: 80,
+        target: "world",
+        emoji: "🚪"
+      }
     ],
-    spawnEnemy(){ }
+
+    spawnEnemy() {}
+  },
+
+  buildingD: {
+    name: "Building D",
+    bg: "#403050",
+
+    doors: [
+      {
+        x: 200,
+        y: 660,
+        w: 80,
+        h: 80,
+        target: "world",
+        emoji: "🚪"
+      }
+    ],
+
+    spawnEnemy() {
+      spawnGermEnemy();
+    },
+
+    decor: [
+      { x: 90, y: 180, emoji: "🧫" },
+      { x: 390, y: 180, emoji: "🧪" },
+      { x: 90, y: 500, emoji: "💊" },
+      { x: 390, y: 500, emoji: "🔬" }
+    ]
   }
 };
 
 let currentRoom = rooms.world;
 
-/* ---------- DRAW EVERYTHING ---------- */
-function draw(){
-  // background
-  ctx.fillStyle = currentRoom.bg;
-  ctx.fillRect(0,0,canvas.width,canvas.height);
 
-  // optional grid (debug)
-  ctx.strokeStyle='rgba(255,255,255,.08)';
-  for(let x=0;x<canvas.width;x+=40){
-    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke();
-  }
-  for(let y=0;y<canvas.height;y+=40){
-    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke();
-  }
+/* --------------------------------------------------------------
+   REMOVE DYNAMIC BUILDINGS FROM THE WORLD
+-------------------------------------------------------------- */
 
-  // doors
-  ctx.font='48px Arial'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillStyle='#000';
-  currentRoom.doors.forEach(d=>{
-    const unlocked = (!d.requiredKills) || (kills >= d.requiredKills);
-    if (unlocked){
-      ctx.fillText(d.emoji||'🚪', d.x+d.w/2, d.y+d.h/2);
-    }else{
-      const lock = d.lockedEmoji||'🔒';
-      ctx.globalAlpha = 0.7;
-      ctx.fillText(lock, d.x+d.w/2, d.y+d.h/2);
-      ctx.globalAlpha = 1;
-      if (d.showLock){
-        ctx.font='20px Arial'; ctx.fillStyle='#ffcc00';
-        ctx.fillText(`${d.requiredKills}`, d.x+d.w/2, d.y+d.h+14);
-        ctx.font='48px Arial'; ctx.fillStyle='#fff';
-      }
-    }
+function resetWorldBuildings() {
+  rooms.world.doors = rooms.world.doors.filter((door) => {
+    return (
+      door.id !== "buildingC" &&
+      door.id !== "buildingD"
+    );
   });
 
-  // room‑specific decor (tables, chairs, bed)
-  if (currentRoom.decor && currentRoom.decor.length){
-    ctx.font='36px Arial'; ctx.fillStyle='#fff';
-    currentRoom.decor.forEach(item=> ctx.fillText(item.emoji, item.x, item.y));
+  buildingCAdded = false;
+  buildingDAdded = false;
+}
+
+
+/* --------------------------------------------------------------
+   RESET GAME
+-------------------------------------------------------------- */
+
+function reset() {
+  resetWorldBuildings();
+
+  currentRoom = rooms.world;
+
+  player = {
+    x: 220,
+    y: 330,
+    w: 30,
+    h: 30,
+    speed: 4.5,
+    flashTimer: 0
+  };
+
+  enemies = [];
+  killEffects = [];
+
+  kills = 0;
+
+  playerHealth = MAX_HEALTH;
+  showHealthBar = false;
+  playerInvuln = 0;
+
+  lastSpawn = 0;
+  lastTime = 0;
+
+  gamePaused = false;
+  pageHidden = document.hidden;
+
+  joystick.active = false;
+  joystick.dx = 0;
+  joystick.dy = 0;
+
+  king.currentLine = 0;
+  king.active = false;
+  king.placed = false;
+  king.talked = false;
+
+  const dialogueBox = document.getElementById(
+    "dialogueBox"
+  );
+
+  if (dialogueBox) {
+    dialogueBox.style.display = "none";
   }
 
-  // player (flashes red while damage cooldown)
-  ctx.font='30px Arial';
-  ctx.fillStyle = (player.flashTimer > 0) ? '#f44' : '#fff';
-  ctx.fillText('🧿', player.x+player.w/2, player.y+player.h/2);
+  const scoreElement = document.getElementById("score");
 
-  // king – only visible inside the castle
-  if (currentRoom === rooms.buildingC){
-    ctx.font='48px Arial'; ctx.fillStyle='#ffde59';
-    ctx.fillText(king.emoji, king.x+king.w/2, king.y+king.h/2);
+  if (scoreElement) {
+    scoreElement.textContent = "0";
+  }
+}
+
+
+/* --------------------------------------------------------------
+   UPDATE PLAYER
+-------------------------------------------------------------- */
+
+function updatePlayer() {
+  if (joystick.active) {
+    const magnitude = Math.hypot(
+      joystick.dx,
+      joystick.dy
+    );
+
+    if (magnitude > 2) {
+      player.x +=
+        (joystick.dx / magnitude) * player.speed;
+
+      player.y +=
+        (joystick.dy / magnitude) * player.speed;
+    }
   }
 
-  // enemies
-  ctx.font='28px Arial';
-  enemies.forEach(e=> ctx.fillText('👾', e.x+e.w/2, e.y+e.h/2));
+  player.x = Math.max(
+    0,
+    Math.min(canvas.width - player.w, player.x)
+  );
 
-  // joystick visual aid
-  if (joystick.active){
-    ctx.beginPath(); ctx.strokeStyle='rgba(255,255,255,.4)'; ctx.lineWidth=3;
-    ctx.arc(joystick.baseX, joystick.baseY, 40, 0, Math.PI*2); ctx.stroke();
+  player.y = Math.max(
+    0,
+    Math.min(canvas.height - player.h, player.y)
+  );
+}
 
-    ctx.beginPath(); ctx.fillStyle='rgba(255,255,255,.5)';
-    ctx.arc(joystick.baseX+joystick.dx, joystick.baseY+joystick.dy, 20, 0, Math.PI*2);
-    ctx.fill();
+
+/* --------------------------------------------------------------
+   UPDATE ENEMIES
+-------------------------------------------------------------- */
+
+function updateEnemies() {
+  enemies.forEach((enemy) => {
+    const enemyCenterX = enemy.x + enemy.w / 2;
+    const enemyCenterY = enemy.y + enemy.h / 2;
+
+    const playerCenterX = player.x + player.w / 2;
+    const playerCenterY = player.y + player.h / 2;
+
+    const dx = playerCenterX - enemyCenterX;
+    const dy = playerCenterY - enemyCenterY;
+
+    const distance = Math.hypot(dx, dy) || 1;
+
+    enemy.x += (dx / distance) * enemy.s;
+    enemy.y += (dy / distance) * enemy.s;
+  });
+}
+
+
+/* --------------------------------------------------------------
+   CREATE VISUAL EFFECT
+-------------------------------------------------------------- */
+
+function createEffect(x, y, emoji, duration = 250) {
+  killEffects.push({
+    x,
+    y,
+    emoji,
+    ttl: duration,
+    maxTtl: duration
+  });
+}
+
+
+/* --------------------------------------------------------------
+   UPDATE VISUAL EFFECTS
+-------------------------------------------------------------- */
+
+function updateKillEffects(delta) {
+  killEffects.forEach((effect) => {
+    effect.ttl -= delta;
+  });
+
+  killEffects = killEffects.filter((effect) => {
+    return effect.ttl > 0;
+  });
+}
+
+
+/* --------------------------------------------------------------
+   DRAW VISUAL EFFECTS
+-------------------------------------------------------------- */
+
+function drawKillEffects() {
+  ctx.save();
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = "32px Arial";
+
+  killEffects.forEach((effect) => {
+    ctx.globalAlpha = Math.max(
+      0,
+      effect.ttl / effect.maxTtl
+    );
+
+    ctx.fillText(
+      effect.emoji || "⚔️",
+      effect.x,
+      effect.y
+    );
+  });
+
+  ctx.restore();
+}
+
+
+/* --------------------------------------------------------------
+   HANDLE ENEMY COLLISIONS
+-------------------------------------------------------------- */
+
+function handleEnemyCollisions() {
+  const toRemove = new Set();
+
+  for (let i = 0; i < enemies.length; i++) {
+    if (toRemove.has(i)) continue;
+
+    for (let j = i + 1; j < enemies.length; j++) {
+      if (toRemove.has(j)) continue;
+
+      const enemyA = enemies[i];
+      const enemyB = enemies[j];
+
+      if (!rectanglesTouch(enemyA, enemyB)) {
+        continue;
+      }
+
+      /*
+         NORMAL ENEMY + NORMAL ENEMY
+
+         Both enemies are destroyed.
+         The player receives one point.
+      */
+
+      if (
+        enemyA.type === "normal" &&
+        enemyB.type === "normal"
+      ) {
+        const effectX =
+          (
+            enemyA.x + enemyA.w / 2 +
+            enemyB.x + enemyB.w / 2
+          ) / 2;
+
+        const effectY =
+          (
+            enemyA.y + enemyA.h / 2 +
+            enemyB.y + enemyB.h / 2
+          ) / 2;
+
+        toRemove.add(i);
+        toRemove.add(j);
+
+        kills++;
+
+        createEffect(
+          effectX,
+          effectY,
+          "⚔️",
+          250
+        );
+
+        break;
+      }
+
+      /*
+         GERM + GERM
+
+         The larger germ absorbs the smaller germ.
+         If they are equal, enemyA absorbs enemyB.
+      */
+
+      if (
+        enemyA.type === "germ" &&
+        enemyB.type === "germ"
+      ) {
+        let absorber;
+        let absorbed;
+        let absorbedIndex;
+
+        if (enemyA.w >= enemyB.w) {
+          absorber = enemyA;
+          absorbed = enemyB;
+          absorbedIndex = j;
+        } else {
+          absorber = enemyB;
+          absorbed = enemyA;
+          absorbedIndex = i;
+        }
+
+        const centerX =
+          absorber.x + absorber.w / 2;
+
+        const centerY =
+          absorber.y + absorber.h / 2;
+
+        const growth = Math.max(
+          5,
+          absorbed.w * 0.28
+        );
+
+        const newSize = Math.min(
+          absorber.maxSize,
+          absorber.w + growth
+        );
+
+        absorber.w = newSize;
+        absorber.h = newSize;
+
+        absorber.x = centerX - newSize / 2;
+        absorber.y = centerY - newSize / 2;
+
+        absorber.health += Math.max(
+          1,
+          Math.ceil(absorbed.health * 0.5)
+        );
+
+        absorber.s = Math.max(
+          0.65,
+          GERM_START_SPEED -
+            (newSize - GERM_START_SIZE) * 0.009
+        );
+
+        toRemove.add(absorbedIndex);
+
+        createEffect(
+          absorber.x + absorber.w / 2,
+          absorber.y + absorber.h / 2,
+          "🧬",
+          300
+        );
+
+        if (absorbedIndex === i) {
+          break;
+        }
+      }
+    }
   }
 
-  // health bar – drawn last, so it’s on top
+  enemies = enemies.filter((enemy, index) => {
+    return !toRemove.has(index);
+  });
+}
+
+
+/* --------------------------------------------------------------
+   DRAW HEALTH BAR
+-------------------------------------------------------------- */
+
+function drawHealthBar() {
+  if (!showHealthBar) return;
+
+  const barW = 200;
+  const barH = 20;
+
+  const x = (canvas.width - barW) / 2;
+  const y = 12;
+
+  const healthPercentage = Math.max(
+    0,
+    playerHealth / MAX_HEALTH
+  );
+
+  ctx.save();
+
+  ctx.fillStyle = "#555";
+  ctx.fillRect(x, y, barW, barH);
+
+  ctx.fillStyle = "#00dd44";
+  ctx.fillRect(
+    x,
+    y,
+    barW * healthPercentage,
+    barH
+  );
+
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x, y, barW, barH);
+
+  ctx.font = "14px Arial";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#ffffff";
+
+  ctx.fillText(
+    `${Math.max(0, playerHealth)} / ${MAX_HEALTH}`,
+    canvas.width / 2,
+    y + barH / 2
+  );
+
+  ctx.restore();
+}
+
+
+/* --------------------------------------------------------------
+   PUSH GERM AWAY FROM PLAYER
+-------------------------------------------------------------- */
+
+function pushGermAwayFromPlayer(germ) {
+  const playerCenterX = player.x + player.w / 2;
+  const playerCenterY = player.y + player.h / 2;
+
+  const germCenterX = germ.x + germ.w / 2;
+  const germCenterY = germ.y + germ.h / 2;
+
+  let dx = germCenterX - playerCenterX;
+  let dy = germCenterY - playerCenterY;
+
+  let distance = Math.hypot(dx, dy);
+
+  if (distance === 0) {
+    dx = Math.random() - 0.5;
+    dy = Math.random() - 0.5;
+    distance = Math.hypot(dx, dy) || 1;
+  }
+
+  germ.x += (dx / distance) * 30;
+  germ.y += (dy / distance) * 30;
+}
+
+
+/* --------------------------------------------------------------
+   DAMAGE PLAYER AND GERM
+-------------------------------------------------------------- */
+
+function damagePlayer(delta) {
+  if (!showHealthBar) return;
+
+  if (playerInvuln > 0) {
+    playerInvuln = Math.max(
+      0,
+      playerInvuln - delta
+    );
+
+    return;
+  }
+
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    const enemy = enemies[i];
+
+    if (!rectanglesTouch(player, enemy)) {
+      continue;
+    }
+
+    playerHealth--;
+    playerInvuln = INVULN_TIME;
+    player.flashTimer = INVULN_TIME;
+
+    /*
+       Germ collisions damage both the player
+       and the germ.
+    */
+
+    if (enemy.type === "germ") {
+      enemy.health--;
+
+      createEffect(
+        enemy.x + enemy.w / 2,
+        enemy.y + enemy.h / 2,
+        "💥",
+        220
+      );
+
+      if (enemy.health <= 0) {
+        const deathX = enemy.x + enemy.w / 2;
+        const deathY = enemy.y + enemy.h / 2;
+
+        enemies.splice(i, 1);
+        kills++;
+
+        createEffect(
+          deathX,
+          deathY,
+          "☠️",
+          350
+        );
+      } else {
+        pushGermAwayFromPlayer(enemy);
+      }
+    }
+
+    /*
+       Only one enemy can damage the player
+       during each invulnerability period.
+    */
+
+    break;
+  }
+}
+
+
+/* --------------------------------------------------------------
+   INSTANT-DEATH COLLISION
+
+   This is used before the player receives
+   the health bar.
+-------------------------------------------------------------- */
+
+function collide() {
+  return enemies.some((enemy) => {
+    return rectanglesTouch(player, enemy);
+  });
+}
+
+
+/* --------------------------------------------------------------
+   BUILDING C UNLOCK
+-------------------------------------------------------------- */
+
+function maybeAddBuildingC() {
+  if (buildingCAdded) return;
+  if (kills < 10) return;
+
+  rooms.world.doors.push({
+    id: "buildingC",
+
+    x: 200,
+    y: 140,
+    w: 80,
+    h: 80,
+
+    target: "buildingC",
+    emoji: "🏰"
+  });
+
+  buildingCAdded = true;
+}
+
+
+/* --------------------------------------------------------------
+   BUILDING D UNLOCK
+
+   Building D appears only when:
+   1. The player has at least 20 points.
+   2. The player has received the health bar.
+-------------------------------------------------------------- */
+
+function maybeAddBuildingD() {
+  if (buildingDAdded) return;
+  if (kills < 20) return;
+  if (!showHealthBar) return;
+
+  rooms.world.doors.push({
+    id: "buildingD",
+
+    x: 350,
+    y: 300,
+    w: 80,
+    h: 80,
+
+    target: "buildingD",
+    emoji: "🏥"
+  });
+
+  buildingDAdded = true;
+}
+
+
+/* --------------------------------------------------------------
+   CHECK UNLOCKS
+-------------------------------------------------------------- */
+
+function updateBuildingUnlocks() {
+  maybeAddBuildingC();
+  maybeAddBuildingD();
+}
+
+
+/* --------------------------------------------------------------
+   PLACE KING
+-------------------------------------------------------------- */
+
+function maybePlaceKing() {
+  if (king.placed) return;
+
+  king.x =
+    canvas.width / 2 -
+    king.w / 2;
+
+  king.y =
+    canvas.height / 2 -
+    king.h / 2 -
+    250;
+
+  king.placed = true;
+}
+
+
+/* --------------------------------------------------------------
+   CHANGE ROOM
+-------------------------------------------------------------- */
+
+function enterRoom(targetRoomName) {
+  const targetRoom = rooms[targetRoomName];
+
+  if (!targetRoom) return;
+
+  currentRoom = targetRoom;
+
+  enemies = [];
+  lastSpawn = 0;
+
+  player.x =
+    canvas.width / 2 -
+    player.w / 2;
+
+  player.y =
+    canvas.height / 2 -
+    player.h / 2;
+
+  joystick.active = false;
+  joystick.dx = 0;
+  joystick.dy = 0;
+
+  if (currentRoom === rooms.buildingC) {
+    maybePlaceKing();
+  }
+
+  if (currentRoom === rooms.world) {
+    king.talked = false;
+    updateBuildingUnlocks();
+  }
+}
+
+
+/* --------------------------------------------------------------
+   CHECK DOOR COLLISION
+-------------------------------------------------------------- */
+
+function checkDoorCollision() {
+  for (const door of currentRoom.doors) {
+    const unlocked =
+      !door.requiredKills ||
+      kills >= door.requiredKills;
+
+    if (!unlocked) continue;
+
+    if (rectanglesTouch(player, door)) {
+      enterRoom(door.target);
+      return;
+    }
+  }
+}
+
+
+/* --------------------------------------------------------------
+   DETERMINE SPAWN INTERVAL
+-------------------------------------------------------------- */
+
+function getCurrentSpawnInterval() {
+  if (currentRoom === rooms.buildingD) {
+    return GERM_ENEMY_SPAWN_INTERVAL;
+  }
+
+  return NORMAL_ENEMY_SPAWN_INTERVAL;
+}
+
+
+/* --------------------------------------------------------------
+   DRAW BACKGROUND GRID
+-------------------------------------------------------------- */
+
+function drawGrid() {
+  ctx.save();
+
+  ctx.strokeStyle = "rgba(255,255,255,0.08)";
+  ctx.lineWidth = 1;
+
+  for (let x = 0; x < canvas.width; x += 40) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, canvas.height);
+    ctx.stroke();
+  }
+
+  for (let y = 0; y < canvas.height; y += 40) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(canvas.width, y);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+
+/* --------------------------------------------------------------
+   DRAW DOORS
+-------------------------------------------------------------- */
+
+function drawDoors() {
+  currentRoom.doors.forEach((door) => {
+    const unlocked =
+      !door.requiredKills ||
+      kills >= door.requiredKills;
+
+    ctx.save();
+
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    if (unlocked) {
+      ctx.font = "48px Arial";
+      ctx.fillStyle = "#ffffff";
+
+      ctx.fillText(
+        door.emoji || "🚪",
+        door.x + door.w / 2,
+        door.y + door.h / 2
+      );
+    } else {
+      ctx.globalAlpha = 0.7;
+      ctx.font = "48px Arial";
+
+      ctx.fillText(
+        door.lockedEmoji || "🔒",
+        door.x + door.w / 2,
+        door.y + door.h / 2
+      );
+
+      ctx.globalAlpha = 1;
+
+      if (door.showLock) {
+        ctx.font = "20px Arial";
+        ctx.fillStyle = "#ffcc00";
+
+        ctx.fillText(
+          String(door.requiredKills),
+          door.x + door.w / 2,
+          door.y + door.h + 14
+        );
+      }
+    }
+
+    ctx.restore();
+  });
+}
+
+
+/* --------------------------------------------------------------
+   DRAW DECORATIONS
+-------------------------------------------------------------- */
+
+function drawDecor() {
+  if (
+    !currentRoom.decor ||
+    currentRoom.decor.length === 0
+  ) {
+    return;
+  }
+
+  ctx.save();
+
+  ctx.font = "36px Arial";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  currentRoom.decor.forEach((item) => {
+    ctx.fillText(
+      item.emoji,
+      item.x,
+      item.y
+    );
+  });
+
+  ctx.restore();
+}
+
+
+/* --------------------------------------------------------------
+   DRAW PLAYER
+-------------------------------------------------------------- */
+
+function drawPlayer() {
+  ctx.save();
+
+  ctx.font = "30px Arial";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  /*
+     The emoji itself cannot receive a normal fill color,
+     so opacity is used to create the damage flash.
+  */
+
+  if (player.flashTimer > 0) {
+    const flashing =
+      Math.floor(player.flashTimer / 100) % 2 === 0;
+
+    ctx.globalAlpha = flashing ? 0.35 : 1;
+  }
+
+  ctx.fillText(
+    "🧿",
+    player.x + player.w / 2,
+    player.y + player.h / 2
+  );
+
+  ctx.restore();
+}
+
+
+/* --------------------------------------------------------------
+   DRAW KING
+-------------------------------------------------------------- */
+
+function drawKing() {
+  if (currentRoom !== rooms.buildingC) {
+    return;
+  }
+
+  ctx.save();
+
+  ctx.font = "48px Arial";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  ctx.fillText(
+    king.emoji,
+    king.x + king.w / 2,
+    king.y + king.h / 2
+  );
+
+  ctx.restore();
+}
+
+
+/* --------------------------------------------------------------
+   DRAW ENEMIES
+-------------------------------------------------------------- */
+
+function drawEnemies() {
+  enemies.forEach((enemy) => {
+    ctx.save();
+
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    if (enemy.type === "germ") {
+      const fontSize = Math.max(
+        28,
+        Math.round(enemy.w)
+      );
+
+      ctx.font = `${fontSize}px Arial`;
+
+      ctx.fillText(
+        "🦠",
+        enemy.x + enemy.w / 2,
+        enemy.y + enemy.h / 2
+      );
+
+      /*
+         Small health indicator above each germ.
+      */
+
+      const germBarWidth = Math.max(
+        24,
+        Math.min(enemy.w, 70)
+      );
+
+      const healthDisplayMax = Math.max(
+        GERM_START_HEALTH,
+        enemy.health
+      );
+
+      const healthRatio = Math.min(
+        1,
+        enemy.health / healthDisplayMax
+      );
+
+      const germBarX =
+        enemy.x +
+        enemy.w / 2 -
+        germBarWidth / 2;
+
+      const germBarY =
+        enemy.y - 8;
+
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.fillRect(
+        germBarX,
+        germBarY,
+        germBarWidth,
+        5
+      );
+
+      ctx.fillStyle = "#aaff55";
+      ctx.fillRect(
+        germBarX,
+        germBarY,
+        germBarWidth * healthRatio,
+        5
+      );
+    } else {
+      ctx.font = "28px Arial";
+
+      ctx.fillText(
+        "👾",
+        enemy.x + enemy.w / 2,
+        enemy.y + enemy.h / 2
+      );
+    }
+
+    ctx.restore();
+  });
+}
+
+
+/* --------------------------------------------------------------
+   DRAW JOYSTICK
+-------------------------------------------------------------- */
+
+function drawJoystick() {
+  if (!joystick.active) return;
+
+  ctx.save();
+
+  ctx.beginPath();
+  ctx.strokeStyle = "rgba(255,255,255,0.4)";
+  ctx.lineWidth = 3;
+
+  ctx.arc(
+    joystick.baseX,
+    joystick.baseY,
+    40,
+    0,
+    Math.PI * 2
+  );
+
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.fillStyle = "rgba(255,255,255,0.5)";
+
+  ctx.arc(
+    joystick.baseX + joystick.dx,
+    joystick.baseY + joystick.dy,
+    20,
+    0,
+    Math.PI * 2
+  );
+
+  ctx.fill();
+
+  ctx.restore();
+}
+
+
+/* --------------------------------------------------------------
+   DRAW ROOM NAME
+-------------------------------------------------------------- */
+
+function drawRoomName() {
+  ctx.save();
+
+  ctx.font = "18px Arial";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  ctx.fillStyle = "rgba(255,255,255,0.9)";
+
+  ctx.fillText(
+    currentRoom.name,
+    12,
+    42
+  );
+
+  ctx.restore();
+}
+
+
+/* --------------------------------------------------------------
+   DRAW EVERYTHING
+-------------------------------------------------------------- */
+
+function draw() {
+  ctx.clearRect(
+    0,
+    0,
+    canvas.width,
+    canvas.height
+  );
+
+  ctx.fillStyle = currentRoom.bg;
+
+  ctx.fillRect(
+    0,
+    0,
+    canvas.width,
+    canvas.height
+  );
+
+  drawGrid();
+  drawDoors();
+  drawDecor();
+  drawKing();
+  drawEnemies();
+  drawPlayer();
+  drawJoystick();
+  drawKillEffects();
+  drawRoomName();
   drawHealthBar();
 }
 
-/* ---------- MAIN LOOP ---------- */
-function loop(timestamp){
+
+/* --------------------------------------------------------------
+   START KING DIALOGUE
+-------------------------------------------------------------- */
+
+function startKingDialogue() {
+  const dialogueBox =
+    document.getElementById("dialogueBox");
+
+  const dialogueLine =
+    document.getElementById("dialogueLine");
+
+  if (!dialogueBox || !dialogueLine || !dlgBtn) {
+    return;
+  }
+
+  king.currentLine = 0;
+  king.active = true;
+  king.talked = true;
+
+  dialogueLine.textContent =
+    king.dialogueLines[0];
+
+  dialogueBox.style.display = "flex";
+
+  dlgBtn.textContent = "Next";
+
+  gamePaused = true;
+
+  joystick.active = false;
+  joystick.dx = 0;
+  joystick.dy = 0;
+}
+
+
+/* --------------------------------------------------------------
+   ADVANCE KING DIALOGUE
+-------------------------------------------------------------- */
+
+function advanceKingDialogue() {
+  if (!king.active) return;
+
+  king.currentLine++;
+
+  const dialogueBox =
+    document.getElementById("dialogueBox");
+
+  const dialogueLine =
+    document.getElementById("dialogueLine");
+
+  if (
+    king.currentLine >=
+    king.dialogueLines.length
+  ) {
+    if (dialogueBox) {
+      dialogueBox.style.display = "none";
+    }
+
+    gamePaused = false;
+    king.active = false;
+
+    if (dlgBtn) {
+      dlgBtn.textContent = "Next";
+    }
+
+    showHealthBar = true;
+    playerHealth = MAX_HEALTH;
+    playerInvuln = 0;
+
+    /*
+       This check matters if the player already has
+       20 points when receiving the health bar.
+    */
+
+    updateBuildingUnlocks();
+
+    /*
+       Reset timing so dialogue time is not counted
+       as game time.
+    */
+
+    lastTime = performance.now();
+
+    return;
+  }
+
+  if (dialogueLine) {
+    dialogueLine.textContent =
+      king.dialogueLines[king.currentLine];
+  }
+
+  if (dlgBtn) {
+    const isLastLine =
+      king.currentLine ===
+      king.dialogueLines.length - 1;
+
+    dlgBtn.textContent =
+      isLastLine ? "Close" : "Next";
+  }
+}
+
+
+/* --------------------------------------------------------------
+   CHECK KING PROXIMITY
+-------------------------------------------------------------- */
+
+function checkKingProximity() {
+  if (currentRoom !== rooms.buildingC) {
+    return;
+  }
+
+  if (king.active) return;
+
+  const kingCenterX =
+    king.x + king.w / 2;
+
+  const kingCenterY =
+    king.y + king.h / 2;
+
+  const playerCenterX =
+    player.x + player.w / 2;
+
+  const playerCenterY =
+    player.y + player.h / 2;
+
+  const distance = Math.hypot(
+    kingCenterX - playerCenterX,
+    kingCenterY - playerCenterY
+  );
+
+  const talkRange = 80;
+
+  if (
+    distance < talkRange &&
+    !king.talked
+  ) {
+    startKingDialogue();
+  }
+
+  if (distance >= talkRange) {
+    king.talked = false;
+  }
+}
+
+
+/* --------------------------------------------------------------
+   END GAME
+-------------------------------------------------------------- */
+
+function endGame(message) {
+  running = false;
+
+  if (anim !== null) {
+    cancelAnimationFrame(anim);
+    anim = null;
+  }
+
+  joystick.active = false;
+  joystick.dx = 0;
+  joystick.dy = 0;
+
+  const finalElement =
+    document.getElementById("final");
+
+  const overlay =
+    document.getElementById("overlay");
+
+  if (finalElement) {
+    finalElement.innerHTML = message;
+  }
+
+  if (overlay) {
+    overlay.style.display = "flex";
+  }
+}
+
+
+/* --------------------------------------------------------------
+   PROCESS GAME OVER
+-------------------------------------------------------------- */
+
+function processGameOver() {
+  const finalScore = kills;
+
+  endGame(
+    `You scored ${finalScore}.<br>` +
+    "Hint: You need certain points to proceed in the game."
+  );
+
+  recordPlaySession(
+    playerName,
+    finalScore
+  );
+
+  refreshLeaderboard();
+}
+
+
+/* --------------------------------------------------------------
+   MAIN GAME LOOP
+-------------------------------------------------------------- */
+
+function loop(timestamp) {
   if (!running) return;
 
-  if (gamePaused){
+  /*
+     Freeze everything while dialogue is open
+     or the browser tab is hidden.
+  */
+
+  if (gamePaused || pageHidden) {
+    lastTime = timestamp;
     anim = requestAnimationFrame(loop);
     return;
   }
 
-  const delta = timestamp - lastTime;
+  /*
+     Avoid a huge delta on the first frame.
+  */
+
+  if (!lastTime) {
+    lastTime = timestamp;
+  }
+
+  /*
+     Cap delta so returning from a slow frame
+     does not instantly remove timers.
+  */
+
+  const delta = Math.min(
+    timestamp - lastTime,
+    50
+  );
+
   lastTime = timestamp;
 
-  // flash timer decay (so draw() can just read the value)
-  if (player.flashTimer > 0) player.flashTimer -= delta;
+  if (player.flashTimer > 0) {
+    player.flashTimer = Math.max(
+      0,
+      player.flashTimer - delta
+    );
+  }
 
-  document.getElementById('score').textContent = kills;
+  const scoreElement =
+    document.getElementById("score");
 
-  if (timestamp - lastSpawn > 1200){
+  if (scoreElement) {
+    scoreElement.textContent = String(kills);
+  }
+
+  updateBuildingUnlocks();
+
+  const spawnInterval =
+    getCurrentSpawnInterval();
+
+  if (timestamp - lastSpawn > spawnInterval) {
     currentRoom.spawnEnemy();
     lastSpawn = timestamp;
   }
@@ -449,171 +1719,403 @@ function loop(timestamp){
   updateKillEffects(delta);
   checkDoorCollision();
 
-  // ---------- DAMAGE handling ----------
-  if (showHealthBar){
-    // health‑based damage after the king’s dialogue
+  /*
+     Damage handling
+  */
+
+  if (showHealthBar) {
     damagePlayer(delta);
-  }else{
-    // instant death before the health bar appears
-    if (collide()){
-      // --- GAME OVER (pre‑king) ---------------------------------
-      endGame(`You scored ${kills}. <br>Hint: You need certain points to proceed in the game.`);
-      recordPlaySession(playerName, kills);
-      return;
-    }
+  } else if (collide()) {
+    processGameOver();
+    return;
+  }
+
+  checkKingProximity();
+
+  if (
+    showHealthBar &&
+    playerHealth <= 0
+  ) {
+    processGameOver();
+    return;
   }
 
   draw();
-  drawKillEffects();
-
-  // ---------- KING PROXIMITY (to start dialogue) ----------
-  if (currentRoom === rooms.buildingC && !king.active){
-    const talkRange = 80;
-    const cx = king.x + king.w/2;
-    const cy = king.y + king.h/2;
-    const px = player.x + player.w/2;
-    const py = player.y + player.h/2;
-    const dist = Math.hypot(cx-px, cy-py);
-
-    if (dist < talkRange && !king.talked){
-      king.active = true;
-      startKingDialogue();
-    }
-
-    // Reset “talked” flag when the player steps away so they can talk again later
-    if (dist >= talkRange) king.talked = false;
-  }
-
-  // ---------- END‑OF‑GAME (health‑based) ----------
-  if (showHealthBar && playerHealth <= 0){
-    endGame(`You scored ${kills}. <br>Hint: You need certain points to proceed in the game.`);
-    recordPlaySession(playerName, kills);
-    // hide UI & clear timers
-    showHealthBar = false;
-    playerInvuln = 0;
-    return;
-  }
 
   anim = requestAnimationFrame(loop);
 }
 
-/* ---------- END‑OF‑GAME helper (overlay) ---------- */
-function endGame(message){
-  running = false;
-  cancelAnimationFrame(anim);
-  document.getElementById('final').innerHTML = message;
-  document.getElementById('overlay').style.display = 'flex';
-}
-
-/* ---------- START / RESTART ---------- */
-function startGame(){
-  if (!playerName) askForName();
-  document.getElementById('overlay').style.display = 'none';
-  reset();
-  running = true;
-  requestAnimationFrame(loop);
-}
-
-/* ---------- DIALOGUE HELPERS ---------- */
-function startKingDialogue(){
-  document.getElementById('dialogueLine').textContent = king.dialogueLines[0];
-  king.currentLine = 0;
-  document.getElementById('dialogueBox').style.display = 'flex';
-  dlgBtn.textContent = 'Next';
-  gamePaused = true;
-  king.talked = true;       // we have just started a conv.
-}
-function advanceKingDialogue(){
-  king.currentLine++;
-
-  // conversation finished → close UI & give player health
-  if (king.currentLine >= king.dialogueLines.length){
-    document.getElementById('dialogueBox').style.display = 'none';
-    gamePaused = false;
-    king.active = false;
-    dlgBtn.textContent = 'Next';
-
-    showHealthBar = true;
-    playerHealth  = MAX_HEALTH;   // full health again
-    return;
-  }
-
-  // otherwise show the next line
-  document.getElementById('dialogueLine').textContent = king.dialogueLines[king.currentLine];
-  dlgBtn.textContent = (king.currentLine === king.dialogueLines.length-1) ? 'Close' : 'Next';
-}
-
-/* ---------- JOYSTICK INPUT ---------- */
-function pos(e){
-  const r = canvas.getBoundingClientRect();
-  return {
-    x: (e.clientX - r.left) * canvas.width / r.width,
-    y: (e.clientY - r.top)  * canvas.height/ r.height
-  };
-}
-canvas.addEventListener('pointerdown', e=>{
-  const p = pos(e);
-  joystick.active = true;
-  joystick.baseX = p.x; joystick.baseY = p.y;
-  joystick.dx = joystick.dy = 0;
-});
-canvas.addEventListener('pointermove', e=>{
-  if (!joystick.active) return;
-  const p = pos(e);
-  let dx = p.x - joystick.baseX,
-      dy = p.y - joystick.baseY;
-  const d = Math.hypot(dx,dy);
-  if (d > joystick.max){ dx = dx/d * joystick.max; dy = dy/d * joystick.max; }
-  joystick.dx = dx; joystick.dy = dy;
-});
-canvas.addEventListener('pointerup',   ()=>{ joystick.active=false; joystick.dx=0; joystick.dy=0; });
-canvas.addEventListener('pointercancel',()=>{ joystick.active=false; });
-
-/* ---------- KEEP CANVAS ASPECT RATIO ---------- */
-function resize(){
-  const maxW = Math.min(window.innerWidth,540);
-  canvas.style.width  = maxW + 'px';
-  canvas.style.height = (maxW * 1170 / 540) + 'px';
-}
-window.addEventListener('resize', resize);
-resize();
-
-/* ---------- PAGE LOAD ---------- */
-window.addEventListener('load', async ()=>{
-  const stored = localStorage.getItem('survivalPlayerName');
-  if (stored){
-    playerName = stored;
-    document.getElementById('playerName').textContent = playerName;
-  }
-  await refreshLeaderboard();
-
-  // hide the dialogue box (it’s already in the DOM) and hook the button
-  document.getElementById('dialogueBox').style.display = 'none';
-  dlgBtn = document.getElementById('dialogueNext');
-  dlgBtn.addEventListener('click', advanceKingDialogue);
-
-  startGame();
-});
-
-/* ---------- OPTIONAL SERVICE‑WORKER ---------- */
-if ('serviceWorker' in navigator){
-  navigator.serviceWorker.register('sw.js')
-    .catch(e=>console.warn('SW registration failed',e));
-}
-
-/* ---------- PLAY AGAIN BUTTON ---------- */
-document.getElementById('retry').addEventListener('click', startGame);
-
-/* ---------- OPTIONAL: “E” key as a fallback for dialogue ---------- */
-window.addEventListener('keydown', e=>{
-  if ((e.key === 'e' || e.key === 'E') &&
-      document.getElementById('dialogueBox').style.display !== 'none'){
-    advanceKingDialogue();
-  }
-});
 
 /* --------------------------------------------------------------
-   If you ever need to call a function from plain HTML (e.g.
-   <button onclick="someFn()">) expose it:
-   window.someFn = () => {...};
+   START OR RESTART GAME
 -------------------------------------------------------------- */
+
+function startGame() {
+  if (!playerName) {
+    askForName();
+  }
+
+  const overlay =
+    document.getElementById("overlay");
+
+  if (overlay) {
+    overlay.style.display = "none";
+  }
+
+  if (anim !== null) {
+    cancelAnimationFrame(anim);
+    anim = null;
+  }
+
+  reset();
+
+  running = true;
+
+  /*
+     performance.now() and requestAnimationFrame timestamps
+     use the same timing system.
+  */
+
+  lastTime = performance.now();
+  lastSpawn = lastTime;
+
+  draw();
+
+  anim = requestAnimationFrame(loop);
+}
+
+
+/* --------------------------------------------------------------
+   POINTER POSITION
+-------------------------------------------------------------- */
+
+function getPointerPosition(event) {
+  const rect = canvas.getBoundingClientRect();
+
+  return {
+    x:
+      (event.clientX - rect.left) *
+      canvas.width /
+      rect.width,
+
+    y:
+      (event.clientY - rect.top) *
+      canvas.height /
+      rect.height
+  };
+}
+
+
+/* --------------------------------------------------------------
+   JOYSTICK POINTER DOWN
+-------------------------------------------------------------- */
+
+canvas.addEventListener(
+  "pointerdown",
+  (event) => {
+    if (
+      !running ||
+      gamePaused ||
+      pageHidden
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const position =
+      getPointerPosition(event);
+
+    joystick.active = true;
+
+    joystick.baseX = position.x;
+    joystick.baseY = position.y;
+
+    joystick.dx = 0;
+    joystick.dy = 0;
+
+    if (canvas.setPointerCapture) {
+      try {
+        canvas.setPointerCapture(
+          event.pointerId
+        );
+      } catch (error) {
+        console.warn(
+          "Pointer capture failed:",
+          error
+        );
+      }
+    }
+  }
+);
+
+
+/* --------------------------------------------------------------
+   JOYSTICK POINTER MOVE
+-------------------------------------------------------------- */
+
+canvas.addEventListener(
+  "pointermove",
+  (event) => {
+    if (!joystick.active) return;
+
+    event.preventDefault();
+
+    const position =
+      getPointerPosition(event);
+
+    let dx =
+      position.x - joystick.baseX;
+
+    let dy =
+      position.y - joystick.baseY;
+
+    const distance =
+      Math.hypot(dx, dy);
+
+    if (distance > joystick.max) {
+      dx =
+        (dx / distance) *
+        joystick.max;
+
+      dy =
+        (dy / distance) *
+        joystick.max;
+    }
+
+    joystick.dx = dx;
+    joystick.dy = dy;
+  }
+);
+
+
+/* --------------------------------------------------------------
+   STOP JOYSTICK
+-------------------------------------------------------------- */
+
+function stopJoystick(event) {
+  if (event) {
+    event.preventDefault();
+  }
+
+  joystick.active = false;
+  joystick.dx = 0;
+  joystick.dy = 0;
+}
+
+canvas.addEventListener(
+  "pointerup",
+  stopJoystick
+);
+
+canvas.addEventListener(
+  "pointercancel",
+  stopJoystick
+);
+
+canvas.addEventListener(
+  "pointerleave",
+  (event) => {
+    if (
+      event.buttons === 0 ||
+      event.pointerType === "mouse"
+    ) {
+      stopJoystick(event);
+    }
+  }
+);
+
+
+/* --------------------------------------------------------------
+   FREEZE GAME WHEN TAB OR BROWSER IS HIDDEN
+
+   This fixes the mobile-browser problem where
+   the game freezes visually but timers keep moving.
+-------------------------------------------------------------- */
+
+document.addEventListener(
+  "visibilitychange",
+  () => {
+    pageHidden = document.hidden;
+
+    joystick.active = false;
+    joystick.dx = 0;
+    joystick.dy = 0;
+
+    /*
+       Reset lastTime on return so hidden time
+       is not included in delta.
+    */
+
+    if (!pageHidden) {
+      lastTime = performance.now();
+      lastSpawn = lastTime;
+    }
+  }
+);
+
+
+/* --------------------------------------------------------------
+   HANDLE WINDOW BLUR AND FOCUS
+-------------------------------------------------------------- */
+
+window.addEventListener(
+  "blur",
+  () => {
+    pageHidden = true;
+
+    joystick.active = false;
+    joystick.dx = 0;
+    joystick.dy = 0;
+  }
+);
+
+window.addEventListener(
+  "focus",
+  () => {
+    pageHidden = document.hidden;
+
+    lastTime = performance.now();
+    lastSpawn = lastTime;
+  }
+);
+
+
+/* --------------------------------------------------------------
+   KEEP CANVAS ASPECT RATIO
+-------------------------------------------------------------- */
+
+function resize() {
+  const maxWidth = Math.min(
+    window.innerWidth,
+    540
+  );
+
+  canvas.style.width =
+    `${maxWidth}px`;
+
+  canvas.style.height =
+    `${maxWidth * 1170 / 540}px`;
+}
+
+window.addEventListener(
+  "resize",
+  resize
+);
+
+resize();
+
+
+/* --------------------------------------------------------------
+   KEYBOARD FALLBACK FOR DIALOGUE
+-------------------------------------------------------------- */
+
+window.addEventListener(
+  "keydown",
+  (event) => {
+    if (
+      event.key !== "e" &&
+      event.key !== "E"
+    ) {
+      return;
+    }
+
+    const dialogueBox =
+      document.getElementById("dialogueBox");
+
+    if (
+      dialogueBox &&
+      dialogueBox.style.display !== "none"
+    ) {
+      advanceKingDialogue();
+    }
+  }
+);
+
+
+/* --------------------------------------------------------------
+   PAGE LOAD
+-------------------------------------------------------------- */
+
+window.addEventListener(
+  "load",
+  async () => {
+    const storedName =
+      localStorage.getItem(
+        "survivalPlayerName"
+      );
+
+    if (storedName) {
+      playerName = storedName;
+
+      const playerNameElement =
+        document.getElementById(
+          "playerName"
+        );
+
+      if (playerNameElement) {
+        playerNameElement.textContent =
+          playerName;
+      }
+    }
+
+    const dialogueBox =
+      document.getElementById(
+        "dialogueBox"
+      );
+
+    if (dialogueBox) {
+      dialogueBox.style.display = "none";
+    }
+
+    dlgBtn =
+      document.getElementById(
+        "dialogueNext"
+      );
+
+    if (dlgBtn) {
+      dlgBtn.addEventListener(
+        "click",
+        advanceKingDialogue
+      );
+    }
+
+    const retryButton =
+      document.getElementById("retry");
+
+    if (retryButton) {
+      retryButton.addEventListener(
+        "click",
+        startGame
+      );
+    }
+
+    await refreshLeaderboard();
+
+    startGame();
+  }
+);
+
+
+/* --------------------------------------------------------------
+   SERVICE WORKER
+-------------------------------------------------------------- */
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker
+    .register("sw.js")
+    .catch((error) => {
+      console.warn(
+        "Service worker registration failed:",
+        error
+      );
+    });
+}
+
+
+/* --------------------------------------------------------------
+   OPTIONAL HTML ACCESS
+-------------------------------------------------------------- */
+
+window.startGame = startGame;
+window.advanceKingDialogue = advanceKingDialogue;
