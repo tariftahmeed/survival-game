@@ -920,7 +920,7 @@ function damagePlayer(delta) {
         );
       }
        
-      if (enemy.health <= 0) {
+      else if (enemy.health <= 0) {
         const deathX = enemy.x + enemy.w / 2;
         const deathY = enemy.y + enemy.h / 2;
 
