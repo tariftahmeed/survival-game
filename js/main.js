@@ -454,13 +454,6 @@ const rooms = {
     spawnEnemy() {
       spawnGermEnemy();
     },
-
-    decor: [
-      { x: 90, y: 180, emoji: "🧫" },
-      { x: 390, y: 180, emoji: "🧪" },
-      { x: 90, y: 500, emoji: "💊" },
-      { x: 390, y: 500, emoji: "🔬" }
-    ]
   }
 };
 
@@ -911,7 +904,22 @@ function damagePlayer(delta) {
         "💥",
         220
       );
+      
+      if (enemy.h === enemy.maxSize) {
+        const deathX = enemy.x + enemy.w / 2;
+        const deathY = enemy.y + enemy.h / 2;
 
+        enemies.splice(i, 1);
+        kills+= 100;
+
+        createEffect(
+          deathX,
+          deathY,
+          "☠️",
+          350
+        );
+      }
+       
       if (enemy.health <= 0) {
         const deathX = enemy.x + enemy.w / 2;
         const deathY = enemy.y + enemy.h / 2;
