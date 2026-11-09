@@ -988,7 +988,6 @@ function maybeAddBuildingC() {
 
 function maybeAddBuildingD() {
   if (buildingDAdded) return;
-  if (kills < 20) return;
   if (!showHealthBar) return;
 
   rooms.world.doors.push({
