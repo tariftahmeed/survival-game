@@ -753,11 +753,27 @@ function handleEnemyCollisions() {
         absorber.x = centerX - newSize / 2;
         absorber.y = centerY - newSize / 2;
 
-        absorber.health += Math.max(
+        
+      if (absorber.h === absorber.maxSize) {
+        const deathX = absorber.x + absorber.w / 2;
+        const deathY = absorber.y + absorber.h / 2;
+
+        enemies.splice(i, 1);
+        kills+= 100;
+
+        createEffect(
+          deathX,
+          deathY,
+          "☠️",
+          350
+        );
+      } else{
+      
+         absorber.health += Math.max(
           1,
           Math.ceil(absorbed.health * 0.5)
         );
-
+      }
         absorber.s = Math.max(
           0.65,
           GERM_START_SPEED -
@@ -904,23 +920,8 @@ function damagePlayer(delta) {
         "💥",
         220
       );
-      
-      if (enemy.h === enemy.maxSize) {
-        const deathX = enemy.x + enemy.w / 2;
-        const deathY = enemy.y + enemy.h / 2;
-
-        enemies.splice(i, 1);
-        kills+= 100;
-
-        createEffect(
-          deathX,
-          deathY,
-          "☠️",
-          350
-        );
-      }
        
-      else if (enemy.health <= 0) {
+      if (enemy.health <= 0) {
         const deathX = enemy.x + enemy.w / 2;
         const deathY = enemy.y + enemy.h / 2;
 
