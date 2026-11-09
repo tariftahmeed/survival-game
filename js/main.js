@@ -917,7 +917,7 @@ function damagePlayer(delta) {
         const deathY = enemy.y + enemy.h / 2;
 
         enemies.splice(i, 1);
-        kills++;
+        kills+= 10;
 
         createEffect(
           deathX,
