@@ -277,7 +277,7 @@ const rooms = {
     name:"World", bg:"#4caf50",
     doors:[
       {id:"buildingA", x:30,  y:540, w:80, h:80, target:"buildingA", emoji:"🏠"},
-      {id:"buildingB", x:380, y:20,  w:80, h:80, target:"buildingB", emoji:"🏢"}
+      {id:"buildingB", x:380, y:800,  w:80, h:80, target:"buildingB", emoji:"🏢"}
     ],
     spawnEnemy(){}
   },
@@ -547,12 +547,12 @@ function collide(){ return enemies.some(e=>rectanglesTouch(player,e)); }
 -------------------------------------------------------------- */
 function maybeAddBuildingC(){
   if (buildingCAdded || kills < 10) return;
-  rooms.world.doors.push({id:"buildingC", x:200, y:140, w:80, h:80, target:"buildingC", emoji:"🏰"});
+  rooms.world.doors.push({id:"buildingC", x:200, y:780, w:80, h:80, target:"buildingC", emoji:"🏰"});
   buildingCAdded = true;
 }
 function maybeAddBuildingD(){
   if (buildingDAdded || !showHealthBar) return;
-  rooms.world.doors.push({id:"buildingD", x:350, y:300, w:80, h:80, target:"buildingD", emoji:"🏥"});
+  rooms.world.doors.push({id:"buildingD", x:350, y:750, w:80, h:80, target:"buildingD", emoji:"🏥"});
   buildingDAdded = true;
 }
 
