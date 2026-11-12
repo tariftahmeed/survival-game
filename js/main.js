@@ -1,5 +1,5 @@
 /* ==============================================================
-   MAIN.JS – Hungry Reds (direction‑aware & sprite‑swap version)
+   MAIN.JS – Hungry Reds (player ↔ monster sprite swap)
    ============================================================== */
 
 /* --------------------------------------------------------------
@@ -37,29 +37,27 @@ const ctx = canvas.getContext("2d");
 ctx.imageSmoothingEnabled = false;
 
 /* --------------------------------------------------------------
-   SPRITE ANIMATION TABLE  (direction aware)
-   --------------------------------------------------------------
-   The sprite sheet (`chars.json`) contains 73 individual PNGs.
-   Indices are zero‑based:
-      0 → sprite_1.png, 1 → sprite_2.png, … 72 → sprite_73.png
-   For the **swap** we simply draw the player with the enemy
-   sprite set (`monster`/`virus`) and draw all enemies with the
-   player sprite set (`player`).  The direction map stays the same.
+   SPRITE ANIMATION TABLE (direction aware)
 -------------------------------------------------------------- */
 const spriteAnimations = {
-  /* ---- PLAYER (now used for ENEMIES) ---- */
+  /* ---- PLAYER ANIMATION SET (now uses the old MONSTER graphics) ---- */
   player: {
+    down:  [46, 47, 48, 49],
+    up:    [46, 47, 48, 49],   // same frame for up
+    left:  [46, 47, 48, 49],   // will be mirrored for left
+    right: [46, 47, 48, 49]    // same frame for right
+  },
+
+  /* ---- MONSTER ANIMATION SET (now uses the old PLAYER graphics) ---- */
+  monster: {
     down:  [0, 1, 2, 3],
     up:    [4, 5, 6, 7],
     left:  [8, 9,10,11],
     right: [12,13,14,15]
   },
 
-  /* ---- ENEMY SPRITES (now used for PLAYER) ---- */
   king:   { down: [23] },
-
-  monster:{ down: [46,47,48,49] },   // normal enemy graphics – will be used for PLAYER
-  virus:  { down: [69,70,71,72] }    // germ enemy graphics – will be used for PLAYER
+  virus:  { down: [69,70,71,72] }
 };
 
 /* --------------------------------------------------------------
@@ -97,7 +95,7 @@ function getAnimationFrames(name, dir = "down") {
   const entry = spriteAnimations[name];
   if (!entry) { console.warn(`No animation entry for "${name}"`); return [0]; }
   if (Array.isArray(entry)) return entry;               // backward‑compat
-  return entry[dir] || entry["down"];                   // fallback
+  return entry[dir] || entry["down"];                  // fallback
 }
 function getAnimationFrameCount(name, dir = "down") {
   return getAnimationFrames(name, dir).length || 1;
@@ -243,7 +241,7 @@ function getEdgeSpawnPosition(size){
 }
 
 /* --------------------------------------------------------------
-   ENEMY SPAWNING (now uses PLAYER sprite set)
+   ENEMY SPAWNING (normal enemies now use the **player** sprite set)
 -------------------------------------------------------------- */
 function spawnEnemy() {
   const pos = getEdgeSpawnPosition(NORMAL_ENEMY_SIZE);
@@ -253,9 +251,11 @@ function spawnEnemy() {
     w:NORMAL_ENEMY_SIZE, h:NORMAL_ENEMY_SIZE,
     s:NORMAL_ENEMY_SPEED,
     animTimer:0, animFrame:0, animFps:6,
-    animFrames:getAnimationFrameCount("player")   // <‑‑ swapped
+    animFrames:getAnimationFrameCount("monster")   // monster = old player graphics (4‑frame walk)
   });
 }
+
+/* Germs stay unchanged */
 function spawnGermEnemy() {
   const pos = getEdgeSpawnPosition(GERM_START_SIZE);
   enemies.push({
@@ -265,7 +265,7 @@ function spawnGermEnemy() {
     s:GERM_START_SPEED,
     health:GERM_START_HEALTH, initialHealth:GERM_START_HEALTH, maxSize:GERM_MAX_SIZE,
     animTimer:0, animFrame:0, animFps:8,
-    animFrames:getAnimationFrameCount("player")   // <‑‑ swapped (player frames)
+    animFrames:getAnimationFrameCount("virus")
   });
 }
 
@@ -281,6 +281,7 @@ const rooms = {
     ],
     spawnEnemy(){}
   },
+
   buildingA:{
     name:"Building A", bg:"#8b4513",
     doors:[{x:200, y:660, w:80, h:80, target:"world", emoji:"🚪"}],
@@ -291,16 +292,19 @@ const rooms = {
       {x:190, y:460, emoji:"🛏️"}
     ]
   },
+
   buildingB:{
     name:"Building B", bg:"#3b5998",
-    doors:[{x:200, y:20, w:80, h:80, target:"world", emoji:"🚪", lockedEmoji:"🔒", requiredKills:5, showLock:true}],
-    spawnEnemy(){ spawnEnemy(); }
+    doors:[{x:200, y:20, w:80, h:80, target:"world", emoji:"🚪", lockedEmoji:"🔒", requiredKills:10, showLock:true}],
+    spawnEnemy(){ spawnEnemy(); }   // always uses the swapped sprite set
   },
+
   buildingC:{
     name:"Building C", bg:"#d1e8f0",
     doors:[{x:200, y:660, w:80, h:80, target:"world", emoji:"🚪"}],
     spawnEnemy(){}
   },
+
   buildingD:{
     name:"Building D", bg:"#403050",
     doors:[{x:200, y:660, w:80, h:80, target:"world", emoji:"🚪"}],
@@ -325,9 +329,10 @@ function reset(){
     w:64, h:64,
     speed:4.5,
     flashTimer:0,
-    dir:"down",                     // direction for player
+    dir:"down",
     animTimer:0, animFrame:0, animFps:8,
-    animFrames:getAnimationFrameCount("monster","down") // player now uses enemy sprite set
+    /* player now uses the MONSTER graphics (single frame) */
+    animFrames:getAnimationFrameCount("player","down")
   };
 
   enemies = []; killEffects = []; kills = 0;
@@ -359,7 +364,7 @@ function updateAnimation(entity, delta){
 }
 
 /* --------------------------------------------------------------
-   PLAYER UPDATE (tracks direction)
+   PLAYER UPDATE (direction handling)
 -------------------------------------------------------------- */
 function updatePlayer(delta){
   let moving = false;
@@ -370,7 +375,7 @@ function updatePlayer(delta){
       const nx = joystick.dx / mag;
       const ny = joystick.dy / mag;
 
-      // choose dominant axis for direction
+      // four‑way direction
       if (Math.abs(nx) > Math.abs(ny)) player.dir = nx > 0 ? "right" : "left";
       else                           player.dir = ny > 0 ? "down" : "up";
 
@@ -380,8 +385,8 @@ function updatePlayer(delta){
   }
 
   if (moving){
-    // recalc frame count if direction changed (cheap)
-    player.animFrames = getAnimationFrameCount("monster", player.dir);
+    // player now uses the MONSTER sprite (single frame) – no need to recalc frames,
+    // but the call is harmless
     updateAnimation(player, delta);
   }else{
     player.animFrame = 0; player.animTimer = 0;
@@ -392,7 +397,7 @@ function updatePlayer(delta){
 }
 
 /* --------------------------------------------------------------
-   ENEMY UPDATE (optional direction for turning)
+   ENEMY UPDATE (direction for optional flipping)
 -------------------------------------------------------------- */
 function updateEnemies(delta){
   enemies.forEach(e=>{
@@ -404,7 +409,7 @@ function updateEnemies(delta){
     e.x += (dx/dist) * e.s;
     e.y += (dy/dist) * e.s;
 
-    // direction for flip (still based on movement)
+    // direction for flip
     if (Math.abs(dx) > Math.abs(dy)) e.dir = dx > 0 ? "right" : "left";
     else                           e.dir = dy > 0 ? "down" : "up";
 
@@ -413,7 +418,7 @@ function updateEnemies(delta){
 }
 
 /* --------------------------------------------------------------
-   VISUAL EFFECTS (kill sparks, etc.)
+   VISUAL EFFECTS (kill sparks)
 -------------------------------------------------------------- */
 function createEffect(x,y,emoji,dur=250){
   killEffects.push({x,y,emoji,ttl:dur,maxTtl:dur});
@@ -435,7 +440,7 @@ function drawKillEffects(){
 }
 
 /* --------------------------------------------------------------
-   ENEMY COLLISIONS (monster‑monster & germ‑germ)
+   ENEMY COLLISIONS (unchanged)
 -------------------------------------------------------------- */
 function handleEnemyCollisions(){
   const remove = new Set();
@@ -446,7 +451,7 @@ function handleEnemyCollisions(){
       const a=enemies[i], b=enemies[j];
       if (!rectanglesTouch(a,b)) continue;
 
-      // normal monsters – both die, player gains points
+      // normal enemies collide
       if (a.type==="normal" && b.type==="normal"){
         const ex=(a.x+b.x)/2 + a.w/2;
         const ey=(a.y+b.y)/2 + a.h/2;
@@ -456,7 +461,7 @@ function handleEnemyCollisions(){
         continue;
       }
 
-      // germs – absorption logic unchanged
+      // germs (absorption) – unchanged
       if (a.type==="germ" && b.type==="germ"){
         let absorber, absorbed, absorbedIdx;
         if (a.w >= b.w){ absorber=a; absorbed=b; absorbedIdx=j; }
@@ -532,7 +537,7 @@ function damagePlayer(delta){
         pushGermAwayFromPlayer(e);
       }
     }
-    break; // only one damage per frame
+    break;
   }
 }
 function collide(){ return enemies.some(e=>rectanglesTouch(player,e)); }
@@ -541,7 +546,7 @@ function collide(){ return enemies.some(e=>rectanglesTouch(player,e)); }
    BUILDING UNLOCK LOGIC
 -------------------------------------------------------------- */
 function maybeAddBuildingC(){
-  if (buildingCAdded || kills < 5) return;
+  if (buildingCAdded || kills < 10) return;
   rooms.world.doors.push({id:"buildingC", x:200, y:140, w:80, h:80, target:"buildingC", emoji:"🏰"});
   buildingCAdded = true;
 }
@@ -695,14 +700,13 @@ function drawPlayer(){
     ctx.globalAlpha = flashing ? 0.35 : 1;
   }
 
-  // PLAYER NOW USES ENEMY SPRITE SET (monster)
-  // Flip left if only right‑facing frames exist
+  /* ---- PLAYER now uses the MONSTER sprite set ---- */
   if (player.dir === "left"){
     ctx.translate(player.x+player.w, player.y);
     ctx.scale(-1,1);
-    drawSprite("monster","right",player.animFrame,0,0,player.w,player.h);
+    drawSprite("player","right",player.animFrame,0,0,player.w,player.h);
   }else{
-    drawSprite("monster",player.dir,player.animFrame,player.x,player.y,player.w,player.h);
+    drawSprite("player",player.dir,player.animFrame,player.x,player.y,player.w,player.h);
   }
   ctx.restore();
 }
@@ -712,17 +716,15 @@ function drawKing(){
 }
 function drawEnemies(){
   enemies.forEach(e=>{
-    // ALL ENEMIES NOW USE PLAYER SPRITE SET
-    const name = "player";
-
+    const spriteName = e.type==="germ" ? "virus" : "monster";   // normal enemies use the MONSTER sprite set (now player graphics)
     if (e.dir === "left"){
       ctx.save();
       ctx.translate(e.x+e.w, e.y);
       ctx.scale(-1,1);
-      drawSprite(name,"right",e.animFrame,0,0,e.w,e.h);
+      drawSprite(spriteName,"right",e.animFrame,0,0,e.w,e.h);
       ctx.restore();
     }else{
-      drawSprite(name,e.dir,e.animFrame,e.x,e.y,e.w,e.h);
+      drawSprite(spriteName,e.dir,e.animFrame,e.x,e.y,e.w,e.h);
     }
 
     // health bar for germs (unchanged)
@@ -875,9 +877,7 @@ canvas.addEventListener("pointermove", e=>{
 function stopJoystick(e){ if (e) e.preventDefault(); joystick.active = false; joystick.dx=0; joystick.dy=0; }
 canvas.addEventListener("pointerup", stopJoystick);
 canvas.addEventListener("pointercancel", stopJoystick);
-canvas.addEventListener("pointerleave", e=>{
-  if (e.buttons===0 || e.pointerType==="mouse") stopJoystick(e);
-});
+canvas.addEventListener("pointerleave", e=>{ if (e.buttons===0 || e.pointerType==="mouse") stopJoystick(e); });
 
 /* --------------------------------------------------------------
    PAGE VISIBILITY (pause when hidden)
