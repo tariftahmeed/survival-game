@@ -2,10 +2,9 @@
    MAIN.JS – “Hungry Reds” (single‑file version)
    --------------------------------------------------------------
    FIXED:
-   • The sprite‑sheet helper now correctly isolates a single frame.
-   • It works with every common JSON descriptor layout.
-   • All draws (player, king, enemies) use that single‑frame
-     rectangle, so no “six‑image‑block” appears any more.
+   • Robust sprite‑sheet rectangle calculation – always returns a
+     single cell even when the JSON descriptor is missing keys.
+   • No more runtime error that stopped the whole game.
 ================================================================*/
 
 /* --------------------------------------------------------------
@@ -44,8 +43,8 @@ const ctx    = canvas.getContext("2d");
 /* --------------------------------------------------------------
    SPRITE‑SHEET LOADER & FRAME HELPER
 -------------------------------------------------------------- */
-const spriteSheet = new Image();           // whole PNG
-let sheetInfo = null;                     // JSON descriptor
+const spriteSheet = new Image();   // whole PNG
+let sheetInfo = null;              // JSON descriptor (columns, cell size …)
 
 /**
  * Load the PNG and its JSON description.
@@ -79,43 +78,42 @@ async function loadSpriteSheet() {
 function getFrameRect(name, frameIdx = 0) {
   if (!sheetInfo) throw new Error("Sprite sheet not loaded yet");
 
-  /* -----------------------------------------------------------------
-     Determine cell size.
-     The JSON may use any of the following keys (different tools):
-        frameWidth / frameHeight
-        manualCellWidth / manualCellHeight
-        cellWidth / cellHeight
-        width / height
-     If none of those exist we fall back to dividing the image size by
-     the column count (assumes a regular grid).
-  ----------------------------------------------------------------- */
+  /* -------------------------------------------------------------
+     Determine the cell size.
+     The JSON may provide any of the following keys – we support
+     them all and fall back to a safe 64 px square when nothing is
+     found.
+  ------------------------------------------------------------- */
   const cellW =
     sheetInfo.frameWidth ??
     sheetInfo.manualCellWidth ??
     sheetInfo.cellWidth ??
     sheetInfo.width ??
-    (sheetInfo.columns ? Math.floor(spriteSheet.width / sheetInfo.columns) : 64);
+    64;                               // <- safe fallback
 
   const cellH =
     sheetInfo.frameHeight ??
     sheetInfo.manualCellHeight ??
     sheetInfo.cellHeight ??
     sheetInfo.height ??
-    (sheetInfo.columns ? Math.floor(spriteSheet.height / 4) : 64); // 4 rows
+    64;                               // <- safe fallback
 
-  if (!Number.isFinite(cellW) || !Number.isFinite(cellH))
-    throw new Error("Unable to determine sprite cell dimensions");
+  // -------------------------------------------------------------
+  // Columns – use the JSON value if present; otherwise infer from
+  // the image dimensions (only after the image has loaded).
+  // -------------------------------------------------------------
+  const columns = (function () {
+    if (Number.isFinite(sheetInfo.columns) && sheetInfo.columns > 0) {
+      return sheetInfo.columns;
+    }
+    // spriteSheet.width is now known because loadSpriteSheet() awaited onload
+    const inferred = Math.floor(spriteSheet.width / cellW);
+    return inferred > 0 ? inferred : 1;
+  })();
 
-  // ---------------------------------------------------------------
-  // Columns – use the value from JSON or infer it from the image.
-  // ---------------------------------------------------------------
-  const columns = sheetInfo.columns ??
-                 Math.floor(spriteSheet.width / cellW) ??
-                 1;
-
-  // ---------------------------------------------------------------
+  // -------------------------------------------------------------
   // Row mapping – the sheet order is fixed.
-  // ---------------------------------------------------------------
+  // -------------------------------------------------------------
   const rowMap = {
     king:    0,
     player:  1,
@@ -528,14 +526,13 @@ function reset() {
    PLAYER UPDATE (movement + animation)
 -------------------------------------------------------------- */
 function updatePlayer(delta) {
-  // ---- joystick movement -------------------------------------------------
   if (joystick.active) {
     const mag = Math.hypot(joystick.dx, joystick.dy);
     if (mag > 2) {
       player.x += (joystick.dx / mag) * player.speed;
       player.y += (joystick.dy / mag) * player.speed;
 
-      // ---- walk animation while moving ------------------------------------
+      // walk animation while moving
       player.animTimer += delta;
       const frameDur = 1000 / player.animFps;
       if (player.animTimer >= frameDur) {
@@ -543,13 +540,12 @@ function updatePlayer(delta) {
         player.animFrame = (player.animFrame + 1) % player.animFrames;
       }
     } else {
-      // idle → frame 0
       player.animFrame = 0;
       player.animTimer = 0;
     }
   }
 
-  // ---- keep inside canvas ------------------------------------------------
+  // keep inside canvas
   player.x = Math.max(0, Math.min(canvas.width - player.w, player.x));
   player.y = Math.max(0, Math.min(canvas.height - player.h, player.y));
 }
@@ -559,7 +555,6 @@ function updatePlayer(delta) {
 -------------------------------------------------------------- */
 function updateEnemies(delta) {
   enemies.forEach(enemy => {
-    // ---- simple homing towards player ------------------------------------
     const ecx = enemy.x + enemy.w / 2;
     const ecy = enemy.y + enemy.h / 2;
     const pcx = player.x + player.w / 2;
@@ -570,7 +565,7 @@ function updateEnemies(delta) {
     enemy.x += (dx / dist) * enemy.s;
     enemy.y += (dy / dist) * enemy.s;
 
-    // ---- animation tick ---------------------------------------------------
+    // animation tick
     enemy.animTimer += delta;
     const frameDur = 1000 / enemy.animFps;
     if (enemy.animTimer >= frameDur) {
@@ -598,7 +593,6 @@ function drawKillEffects() {
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.font = "32px Arial";
-
   killEffects.forEach(e => {
     ctx.globalAlpha = Math.max(0, e.ttl / e.maxTtl);
     ctx.fillText(e.emoji || "⚔️", e.x, e.y);
@@ -618,7 +612,7 @@ function handleEnemyCollisions() {
       const b = enemies[j];
       if (!rectanglesTouch(a, b)) continue;
 
-      // ----- normal‑normal → both die, give player a point ----------------
+      // normal‑normal → both die
       if (a.type === "normal" && b.type === "normal") {
         const midX = (a.x + b.x) / 2 + a.w / 2;
         const midY = (a.y + b.y) / 2 + a.h / 2;
@@ -629,9 +623,8 @@ function handleEnemyCollisions() {
         continue;
       }
 
-      // ----- germ‑germ (absorption) ----------------------------------------
+      // germ‑germ (absorption)
       if (a.type === "germ" && b.type === "germ") {
-        // larger absorbs the smaller (or a if equal)
         let absorber, absorbed, absorbedIdx;
         if (a.w >= b.w) {
           absorber = a; absorbed = b; absorbedIdx = j;
@@ -648,9 +641,7 @@ function handleEnemyCollisions() {
         absorber.x = centerX - newSize / 2;
         absorber.y = centerY - newSize / 2;
 
-        // health & speed adjustments
         if (absorber.h === absorber.maxSize) {
-          // full‑size germ dies → big bonus
           const deathX = absorber.x + absorber.w / 2;
           const deathY = absorber.y + absorber.h / 2;
           enemies.splice(i, 1);
@@ -736,12 +727,12 @@ function damagePlayer(delta) {
     const enemy = enemies[i];
     if (!rectanglesTouch(player, enemy)) continue;
 
-    // ----- player hit ---------------------------------------------------
+    // player hit
     playerHealth--;
     playerInvuln   = INVULN_TIME;
     player.flashTimer = INVULN_TIME;
 
-    // ----- extra logic if the enemy is a germ -------------------------
+    // extra logic if the enemy is a germ
     if (enemy.type === "germ") {
       enemy.health--;
       createEffect(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, "💥", 220);
@@ -756,7 +747,7 @@ function damagePlayer(delta) {
       }
     }
 
-    // only one enemy can damage the player per invulnerability period
+    // only one enemy damages the player per invulnerability period
     break;
   }
 }
@@ -915,7 +906,6 @@ function drawDecor() {
 -------------------------------------------------------------- */
 function drawPlayer() {
   ctx.save();
-  // flash‑red overlay while hit (still works)
   if (player.flashTimer > 0) {
     const flashing = Math.floor(player.flashTimer / 100) % 2 === 0;
     ctx.globalAlpha = flashing ? 0.35 : 1;
@@ -929,7 +919,6 @@ function drawPlayer() {
     player.w,
     player.h
   );
-
   ctx.restore();
 }
 
@@ -949,11 +938,10 @@ function drawKing() {
 function drawEnemies() {
   enemies.forEach(enemy => {
     ctx.save();
-
     const spriteName = enemy.type === "germ" ? "virus" : "monster";
     drawSprite(spriteName, enemy.animFrame, enemy.x, enemy.y, enemy.w, enemy.h);
 
-    // ---- health bar for germs ---------------------------------------
+    // health bar for germs
     if (enemy.type === "germ") {
       const barW = Math.max(24, Math.min(enemy.w, 70));
       const maxHealth = Math.max(GERM_START_HEALTH, enemy.health);
@@ -965,7 +953,6 @@ function drawEnemies() {
       ctx.fillStyle = "#aaff55";
       ctx.fillRect(barX, barY, barW * ratio, 5);
     }
-
     ctx.restore();
   });
 }
@@ -1060,7 +1047,6 @@ function advanceKingDialogue() {
   const dlgBox = document.getElementById("dialogueBox");
   const line   = document.getElementById("dialogueLine");
   if (king.currentLine >= king.dialogueLines.length) {
-    // dialogue finished – give health bar back
     dlgBox.style.display = "none";
     gamePaused = false;
     king.active = false;
@@ -1070,14 +1056,12 @@ function advanceKingDialogue() {
     playerHealth = MAX_HEALTH;
     playerInvuln = 0;
 
-    // extra unlock check (if player already has 20 kills, unlock D now)
     maybeAddBuildingD();
 
-    lastTime = performance.now();   // reset delta after pause
+    lastTime = performance.now();
     return;
   }
 
-  // show next line
   line.textContent = king.dialogueLines[king.currentLine];
   dlgBtn.textContent = (king.currentLine === king.dialogueLines.length - 1) ? "Close" : "Next";
 }
@@ -1142,44 +1126,35 @@ function loop(timestamp) {
     return;
   }
 
-  // first frame → we have no delta yet
   if (!lastTime) lastTime = timestamp;
-  const delta = Math.min(timestamp - lastTime, 50); // cap at 50 ms
+  const delta = Math.min(timestamp - lastTime, 50);
   lastTime = timestamp;
 
-  // flash‑timer decay (player hit flash)
+  // flash‑timer decay
   if (player.flashTimer > 0) player.flashTimer = Math.max(0, player.flashTimer - delta);
 
   // UI score update
   const scoreEl = document.getElementById("score");
   if (scoreEl) scoreEl.textContent = String(kills);
 
-  // ----------------------------------------------------------------
-  // 1️⃣  UNLOCKS (building C & D) – may add doors
-  // ----------------------------------------------------------------
+  // 1️⃣ UNLOCKS
   maybeAddBuildingC();
   maybeAddBuildingD();
 
-  // ----------------------------------------------------------------
-  // 2️⃣  SPAWN ENEMIES (based on current room)
-  // ----------------------------------------------------------------
+  // 2️⃣ SPAWN ENEMIES
   if (timestamp - lastSpawn > getCurrentSpawnInterval()) {
     currentRoom.spawnEnemy();
     lastSpawn = timestamp;
   }
 
-  // ----------------------------------------------------------------
-  // 3️⃣  UPDATE LOGIC
-  // ----------------------------------------------------------------
+  // 3️⃣ UPDATE LOGIC
   updatePlayer(delta);
   updateEnemies(delta);
   handleEnemyCollisions();
   updateKillEffects(delta);
   checkDoorCollision();
 
-  // ----------------------------------------------------------------
-  // 4️⃣  DAMAGE / DEATH handling
-  // ----------------------------------------------------------------
+  // 4️⃣ DAMAGE / DEATH
   if (showHealthBar) {
     damagePlayer(delta);
   } else if (collide()) {
@@ -1187,25 +1162,18 @@ function loop(timestamp) {
     return;
   }
 
-  // ----------------------------------------------------------------
-  // 5️⃣  KING PROXIMITY (auto‑dialogue)
-  // ----------------------------------------------------------------
+  // 5️⃣ KING PROXIMITY
   checkKingProximity();
 
-  // ----------------------------------------------------------------
-  // 6️⃣  END‑OF‑GAME (health reaches 0)
-  // ----------------------------------------------------------------
+  // 6️⃣ END‑OF‑GAME (health reaches 0)
   if (showHealthBar && playerHealth <= 0) {
     processGameOver();
     return;
   }
 
-  // ----------------------------------------------------------------
-  // 7️⃣  DRAW EVERYTHING
-  // ----------------------------------------------------------------
+  // 7️⃣ DRAW
   draw();
 
-  // schedule next frame
   anim = requestAnimationFrame(loop);
 }
 
@@ -1226,7 +1194,7 @@ function startGame() {
   lastTime = performance.now();
   lastSpawn = lastTime;
 
-  draw();                     // draw the first frame immediately
+  draw();                     // immediate first frame
   anim = requestAnimationFrame(loop);
 }
 
@@ -1335,12 +1303,10 @@ window.addEventListener("keydown", e => {
    PAGE LOAD – initialise everything
 -------------------------------------------------------------- */
 window.addEventListener("load", async () => {
-  // ---- 1️⃣  Load sprite‑sheet (must happen before any draw) ----------
+  // 1️⃣ Load sprite‑sheet (must happen before any draw)
   await loadSpriteSheet();
 
-  // --------------------------------------------------------------------
-  // 2️⃣  Restore stored player name (if any)
-  // --------------------------------------------------------------------
+  // 2️⃣ Restore stored player name (if any)
   const stored = localStorage.getItem("survivalPlayerName");
   if (stored) {
     playerName = stored;
@@ -1348,24 +1314,18 @@ window.addEventListener("load", async () => {
     if (el) el.textContent = playerName;
   }
 
-  // --------------------------------------------------------------------
-  // 3️⃣  Hide the (still‑emoji) dialogue box and hook its button
-  // --------------------------------------------------------------------
+  // 3️⃣ Hide dialogue box and hook its button
   const dlgBox = document.getElementById("dialogueBox");
   if (dlgBox) dlgBox.style.display = "none";
 
   dlgBtn = document.getElementById("dialogueNext");
   if (dlgBtn) dlgBtn.addEventListener("click", advanceKingDialogue);
 
-  // --------------------------------------------------------------------
-  // 4️⃣  Hook the retry button
-  // --------------------------------------------------------------------
+  // 4️⃣ Hook retry button
   const retry = document.getElementById("retry");
   if (retry) retry.addEventListener("click", startGame);
 
-  // --------------------------------------------------------------------
-  // 5️⃣  Populate leaderboard and start the first game
-  // --------------------------------------------------------------------
+  // 5️⃣ Populate leaderboard and start the first game
   await refreshLeaderboard();
   startGame();
 });
