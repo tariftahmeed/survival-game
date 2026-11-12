@@ -1,9 +1,5 @@
 /* ==============================================================
-   MAIN.JS – Hungry Reds (rewritten)
-   --------------------------------------------------------------
-   • Direction‑aware sprite handling
-   • Same gameplay, UI and Firebase integration as before
-   • No external libraries besides Firebase
+   MAIN.JS – Hungry Reds (direction‑aware & sprite‑swap version)
    ============================================================== */
 
 /* --------------------------------------------------------------
@@ -41,18 +37,17 @@ const ctx = canvas.getContext("2d");
 ctx.imageSmoothingEnabled = false;
 
 /* --------------------------------------------------------------
-   SPRITE SETTINGS & ANIMATION TABLE
--------------------------------------------------------------- */
-/*
+   SPRITE ANIMATION TABLE  (direction aware)
+   --------------------------------------------------------------
    The sprite sheet (`chars.json`) contains 73 individual PNGs.
    Indices are zero‑based:
-       0 → sprite_1.png, 1 → sprite_2.png, … 72 → sprite_73.png
-   To support four directions we store a *direction map* for each
-   character.  If you only have right‑facing frames you can re‑use
-   the same indexes for the other directions – the draw routine
-   will flip the canvas for “left”.
-*/
+      0 → sprite_1.png, 1 → sprite_2.png, … 72 → sprite_73.png
+   For the **swap** we simply draw the player with the enemy
+   sprite set (`monster`/`virus`) and draw all enemies with the
+   player sprite set (`player`).  The direction map stays the same.
+-------------------------------------------------------------- */
 const spriteAnimations = {
+  /* ---- PLAYER (now used for ENEMIES) ---- */
   player: {
     down:  [0, 1, 2, 3],
     up:    [4, 5, 6, 7],
@@ -60,11 +55,11 @@ const spriteAnimations = {
     right: [12,13,14,15]
   },
 
+  /* ---- ENEMY SPRITES (now used for PLAYER) ---- */
   king:   { down: [23] },
 
-  monster:{ down: [46,47,48,49] },
-
-  virus:  { down: [69,70,71,72] }
+  monster:{ down: [46,47,48,49] },   // normal enemy graphics – will be used for PLAYER
+  virus:  { down: [69,70,71,72] }    // germ enemy graphics – will be used for PLAYER
 };
 
 /* --------------------------------------------------------------
@@ -77,11 +72,7 @@ async function loadSpriteSheet() {
   const response = await fetch("assets/sprites/chars.json", {
     cache: "no-store"
   });
-
-  if (!response.ok) {
-    throw new Error(`Could not load chars.json – HTTP ${response.status}`);
-  }
-
+  if (!response.ok) throw new Error(`Could not load chars.json – HTTP ${response.status}`);
   sheetInfo = await response.json();
 
   const sprites = sheetInfo?.layers?.flatMap(l => l.sprites ?? []);
@@ -97,42 +88,30 @@ async function loadSpriteSheet() {
       img.src = spr.base64;
     }))
   );
-
-  console.log(`Loaded ${spriteImages.length} sprites.`);
 }
 
 /* --------------------------------------------------------------
-   SPRITE HELPERS – direction aware
+   SPRITE HELPERS (direction aware)
 -------------------------------------------------------------- */
 function getAnimationFrames(name, dir = "down") {
   const entry = spriteAnimations[name];
   if (!entry) { console.warn(`No animation entry for "${name}"`); return [0]; }
-  if (Array.isArray(entry)) return entry;                // backward‑compat
-  return entry[dir] || entry["down"];                    // fallback
+  if (Array.isArray(entry)) return entry;               // backward‑compat
+  return entry[dir] || entry["down"];                   // fallback
 }
-
 function getAnimationFrameCount(name, dir = "down") {
   return getAnimationFrames(name, dir).length || 1;
 }
-
-/* Returns the *Image* for the given entity, direction and frame index */
 function getSpriteImage(name, dir, frameIndex = 0) {
   const frames = getAnimationFrames(name, dir);
   if (!frames.length) return null;
-
   const safe = Number.isFinite(frameIndex) ? Math.floor(frameIndex) : 0;
   const wrapped = ((safe % frames.length) + frames.length) % frames.length;
-  const spriteIdx = frames[wrapped];
-  const img = spriteImages[spriteIdx];
-
-  if (!img) {
-    console.warn(`Sprite ${spriteIdx+1} for "${name}" not loaded`);
-    return null;
-  }
+  const idx = frames[wrapped];
+  const img = spriteImages[idx];
+  if (!img) { console.warn(`Sprite ${idx+1} for "${name}" not loaded`); return null; }
   return img;
 }
-
-/* Draws a single sprite, keeping aspect ratio and bottom‑alignment */
 function drawSprite(name, dir, frameIdx, dx, dy, dw = 64, dh = 64) {
   const img = getSpriteImage(name, dir, frameIdx);
   if (!img) return;
@@ -211,7 +190,7 @@ async function fetchTop3() {
   try {
     const q = query(scoresCol, orderBy("score","desc"), limit(3));
     const snap = await getDocs(q);
-    return snap.docs.map(d => d.data());
+    return snap.docs.map(d=>d.data());
   } catch (e) { console.warn("Failed to fetch leaderboard:", e); return []; }
 }
 async function refreshLeaderboard() {
@@ -231,7 +210,7 @@ async function refreshLeaderboard() {
 -------------------------------------------------------------- */
 function askForName() {
   const stored = localStorage.getItem("survivalPlayerName");
-  if (stored) { playerName = stored; }
+  if (stored) playerName = stored;
   else {
     let name = "";
     while (!name.trim())
@@ -264,7 +243,7 @@ function getEdgeSpawnPosition(size){
 }
 
 /* --------------------------------------------------------------
-   ENEMY SPAWNING
+   ENEMY SPAWNING (now uses PLAYER sprite set)
 -------------------------------------------------------------- */
 function spawnEnemy() {
   const pos = getEdgeSpawnPosition(NORMAL_ENEMY_SIZE);
@@ -274,7 +253,7 @@ function spawnEnemy() {
     w:NORMAL_ENEMY_SIZE, h:NORMAL_ENEMY_SIZE,
     s:NORMAL_ENEMY_SPEED,
     animTimer:0, animFrame:0, animFps:6,
-    animFrames:getAnimationFrameCount("monster")
+    animFrames:getAnimationFrameCount("player")   // <‑‑ swapped
   });
 }
 function spawnGermEnemy() {
@@ -286,7 +265,7 @@ function spawnGermEnemy() {
     s:GERM_START_SPEED,
     health:GERM_START_HEALTH, initialHealth:GERM_START_HEALTH, maxSize:GERM_MAX_SIZE,
     animTimer:0, animFrame:0, animFps:8,
-    animFrames:getAnimationFrameCount("virus")
+    animFrames:getAnimationFrameCount("player")   // <‑‑ swapped (player frames)
   });
 }
 
@@ -320,7 +299,7 @@ const rooms = {
   buildingC:{
     name:"Building C", bg:"#d1e8f0",
     doors:[{x:200, y:660, w:80, h:80, target:"world", emoji:"🚪"}],
-    spawnEnemy(){},
+    spawnEnemy(){}
   },
   buildingD:{
     name:"Building D", bg:"#403050",
@@ -346,16 +325,16 @@ function reset(){
     w:64, h:64,
     speed:4.5,
     flashTimer:0,
-    dir:"down",                         // <-- direction start
+    dir:"down",                     // direction for player
     animTimer:0, animFrame:0, animFps:8,
-    animFrames:getAnimationFrameCount("player","down")
+    animFrames:getAnimationFrameCount("monster","down") // player now uses enemy sprite set
   };
 
   enemies = []; killEffects = []; kills = 0;
   playerHealth = MAX_HEALTH; showHealthBar = false; playerInvuln = 0;
   lastSpawn = 0; lastTime = 0;
   running = false; gamePaused = false; pageHidden = document.hidden;
-  joystick.active = false; joystick.dx=0; joystick.dy=0;
+  joystick.active = false; joystick.dx = 0; joystick.dy = 0;
   king.currentLine = 0; king.active = false; king.placed = false; king.talked = false;
   const dlg = document.getElementById("dialogueBox");
   if (dlg) dlg.style.display = "none";
@@ -380,11 +359,10 @@ function updateAnimation(entity, delta){
 }
 
 /* --------------------------------------------------------------
-   PLAYER UPDATE (now tracks direction)
+   PLAYER UPDATE (tracks direction)
 -------------------------------------------------------------- */
 function updatePlayer(delta){
   let moving = false;
-
   if (joystick.active){
     const mag = Math.hypot(joystick.dx, joystick.dy);
     if (mag > 2){
@@ -392,12 +370,9 @@ function updatePlayer(delta){
       const nx = joystick.dx / mag;
       const ny = joystick.dy / mag;
 
-      // ---- direction detection (4‑way) ----
-      if (Math.abs(nx) > Math.abs(ny)){
-        player.dir = nx > 0 ? "right" : "left";
-      }else{
-        player.dir = ny > 0 ? "down" : "up";
-      }
+      // choose dominant axis for direction
+      if (Math.abs(nx) > Math.abs(ny)) player.dir = nx > 0 ? "right" : "left";
+      else                           player.dir = ny > 0 ? "down" : "up";
 
       player.x += nx * player.speed;
       player.y += ny * player.speed;
@@ -405,21 +380,19 @@ function updatePlayer(delta){
   }
 
   if (moving){
-    // recalc frame count if direction changed (optional but cheap)
-    player.animFrames = getAnimationFrameCount("player", player.dir);
+    // recalc frame count if direction changed (cheap)
+    player.animFrames = getAnimationFrameCount("monster", player.dir);
     updateAnimation(player, delta);
   }else{
-    player.animFrame = 0;
-    player.animTimer = 0;
+    player.animFrame = 0; player.animTimer = 0;
   }
 
-  // keep inside canvas
   player.x = Math.max(0, Math.min(canvas.width - player.w, player.x));
   player.y = Math.max(0, Math.min(canvas.height - player.h, player.y));
 }
 
 /* --------------------------------------------------------------
-   ENEMY UPDATE – optional direction for turning
+   ENEMY UPDATE (optional direction for turning)
 -------------------------------------------------------------- */
 function updateEnemies(delta){
   enemies.forEach(e=>{
@@ -428,16 +401,12 @@ function updateEnemies(delta){
     const dx = px - cx, dy = py - cy;
     const dist = Math.hypot(dx, dy) || 1;
 
-    // movement toward player
     e.x += (dx/dist) * e.s;
     e.y += (dy/dist) * e.s;
 
-    // optional direction for sprite flip
-    if (Math.abs(dx) > Math.abs(dy)){
-      e.dir = dx > 0 ? "right" : "left";
-    }else{
-      e.dir = dy > 0 ? "down" : "up";
-    }
+    // direction for flip (still based on movement)
+    if (Math.abs(dx) > Math.abs(dy)) e.dir = dx > 0 ? "right" : "left";
+    else                           e.dir = dy > 0 ? "down" : "up";
 
     updateAnimation(e, delta);
   });
@@ -450,7 +419,7 @@ function createEffect(x,y,emoji,dur=250){
   killEffects.push({x,y,emoji,ttl:dur,maxTtl:dur});
 }
 function updateKillEffects(delta){
-  for(let i=killEffects.length-1;i>=0;--i){
+  for (let i=killEffects.length-1;i>=0;--i){
     killEffects[i].ttl -= delta;
     if (killEffects[i].ttl <= 0) killEffects.splice(i,1);
   }
@@ -471,8 +440,8 @@ function drawKillEffects(){
 function handleEnemyCollisions(){
   const remove = new Set();
 
-  for(let i=0;i<enemies.length;i++){
-    for(let j=i+1;j<enemies.length;j++){
+  for (let i=0;i<enemies.length;i++){
+    for (let j=i+1;j<enemies.length;j++){
       if (remove.has(i)||remove.has(j)) continue;
       const a=enemies[i], b=enemies[j];
       if (!rectanglesTouch(a,b)) continue;
@@ -487,11 +456,11 @@ function handleEnemyCollisions(){
         continue;
       }
 
-      // germs – one absorbs the other
+      // germs – absorption logic unchanged
       if (a.type==="germ" && b.type==="germ"){
         let absorber, absorbed, absorbedIdx;
         if (a.w >= b.w){ absorber=a; absorbed=b; absorbedIdx=j; }
-        else{ absorber=b; absorbed=a; absorbedIdx=i; }
+        else { absorber=b; absorbed=a; absorbedIdx=i; }
 
         const cx = absorber.x + absorber.w/2;
         const cy = absorber.y + absorber.h/2;
@@ -515,7 +484,6 @@ function handleEnemyCollisions(){
       }
     }
   }
-
   enemies = enemies.filter((_,i)=>!remove.has(i));
 }
 
@@ -541,8 +509,7 @@ function pushGermAwayFromPlayer(g){
   let dx = gcx - pcx, dy = gcy - pcy;
   let dist = Math.hypot(dx, dy);
   if (dist===0){ dx = Math.random()-0.5; dy = Math.random()-0.5; dist = Math.hypot(dx,dy)||1; }
-  g.x += (dx/dist)*30;
-  g.y += (dy/dist)*30;
+  g.x += (dx/dist)*30; g.y += (dy/dist)*30;
 }
 function damagePlayer(delta){
   if (!showHealthBar) return;
@@ -550,7 +517,7 @@ function damagePlayer(delta){
 
   for (let i=enemies.length-1;i>=0;i--){
     const e = enemies[i];
-    if (!rectanglesTouch(player, e)) continue;
+    if (!rectanglesTouch(player,e)) continue;
 
     playerHealth--; playerInvuln = INVULN_TIME; player.flashTimer = INVULN_TIME;
     if (e.type==="germ"){
@@ -620,7 +587,6 @@ function advanceKingDialogue(){
     lastTime = performance.now();
     return;
   }
-
   dlgLine.textContent = king.dialogueLines[king.currentLine];
   dlgBtn.textContent = king.currentLine===king.dialogueLines.length-1 ? "Close" : "Next";
 }
@@ -639,7 +605,7 @@ function checkKingProximity(){
 function endGame(message){
   running = false;
   if (anim!==null){ cancelAnimationFrame(anim); anim=null; }
-  joystick.active = false; joystick.dx=0; joystick.dy=0;
+  joystick.active = false; joystick.dx = 0; joystick.dy = 0;
   const final = document.getElementById("final");
   const overlay = document.getElementById("overlay");
   if (final) final.innerHTML = message;
@@ -662,7 +628,7 @@ function enterRoom(targetName){
   enemies = []; lastSpawn = 0;
   player.x = canvas.width/2 - player.w/2;
   player.y = canvas.height/2 - player.h/2;
-  joystick.active = false; joystick.dx=0; joystick.dy=0;
+  joystick.active = false; joystick.dx = 0; joystick.dy = 0;
 
   if (currentRoom===rooms.buildingC) maybePlaceKing();
   if (currentRoom===rooms.world){
@@ -685,7 +651,7 @@ function getCurrentSpawnInterval(){
 }
 
 /* --------------------------------------------------------------
-   DRAWING HELPERS (background, grid, doors, decor, etc.)
+   DRAW BACKGROUND / GRID / DOORS / DECOR
 -------------------------------------------------------------- */
 function drawGrid(){
   ctx.save(); ctx.strokeStyle="rgba(255,255,255,0.08)"; ctx.lineWidth=1;
@@ -720,21 +686,23 @@ function drawDecor(){
 }
 
 /* --------------------------------------------------------------
-   DRAW ENTITIES (player, king, enemies)
+   DRAW ENTITIES (PLAYER, KING, ENEMIES)
 -------------------------------------------------------------- */
 function drawPlayer(){
   ctx.save();
   if (player.flashTimer>0){
-    const flash = Math.floor(player.flashTimer/100)%2===0;
-    ctx.globalAlpha = flash ? 0.35 : 1;
+    const flashing = Math.floor(player.flashTimer/100)%2===0;
+    ctx.globalAlpha = flashing ? 0.35 : 1;
   }
-  // Flip horizontally for “left” if you only have right‑facing sprites
-  if (player.dir==="left"){
+
+  // PLAYER NOW USES ENEMY SPRITE SET (monster)
+  // Flip left if only right‑facing frames exist
+  if (player.dir === "left"){
     ctx.translate(player.x+player.w, player.y);
     ctx.scale(-1,1);
-    drawSprite("player","right",player.animFrame,0,0,player.w,player.h);
+    drawSprite("monster","right",player.animFrame,0,0,player.w,player.h);
   }else{
-    drawSprite("player",player.dir,player.animFrame,player.x,player.y,player.w,player.h);
+    drawSprite("monster",player.dir,player.animFrame,player.x,player.y,player.w,player.h);
   }
   ctx.restore();
 }
@@ -744,9 +712,10 @@ function drawKing(){
 }
 function drawEnemies(){
   enemies.forEach(e=>{
-    const name = e.type==="germ" ? "virus" : "monster";
-    // flip left if we only have right frames
-    if (e.dir==="left"){
+    // ALL ENEMIES NOW USE PLAYER SPRITE SET
+    const name = "player";
+
+    if (e.dir === "left"){
       ctx.save();
       ctx.translate(e.x+e.w, e.y);
       ctx.scale(-1,1);
@@ -756,7 +725,7 @@ function drawEnemies(){
       drawSprite(name,e.dir,e.animFrame,e.x,e.y,e.w,e.h);
     }
 
-    // health bar for germs
+    // health bar for germs (unchanged)
     if (e.type==="germ"){
       const barW = Math.max(24, Math.min(e.w,70));
       const maxH = Math.max(e.initialHealth, e.health);
@@ -825,21 +794,17 @@ function loop(timestamp){
   const delta = Math.min(timestamp - lastTime, 50);
   lastTime = timestamp;
 
-  // flash timer
   if (player.flashTimer>0) player.flashTimer = Math.max(0, player.flashTimer - delta);
 
-  // UI score
   const scoreEl = document.getElementById("score");
   if (scoreEl) scoreEl.textContent = String(kills);
 
-  // spawn enemies
   maybeAddBuildingC(); maybeAddBuildingD();
   if (timestamp - lastSpawn > getCurrentSpawnInterval()){
     currentRoom.spawnEnemy();
     lastSpawn = timestamp;
   }
 
-  // update world
   updatePlayer(delta);
   updateEnemies(delta);
   handleEnemyCollisions();
@@ -850,7 +815,6 @@ function loop(timestamp){
   else if (collide()){ processGameOver(); return; }
 
   checkKingProximity();
-
   if (showHealthBar && playerHealth <= 0){ processGameOver(); return; }
 
   draw();
@@ -882,8 +846,8 @@ function startGame(){
 function getPointerPosition(event){
   const rect = canvas.getBoundingClientRect();
   return {
-    x: (event.clientX - rect.left) * canvas.width / rect.width,
-    y: (event.clientY - rect.top)  * canvas.height/ rect.height
+    x: (event.clientX - rect.left) * canvas.width  / rect.width,
+    y: (event.clientY - rect.top)  * canvas.height / rect.height
   };
 }
 canvas.addEventListener("pointerdown", e=>{
@@ -908,10 +872,7 @@ canvas.addEventListener("pointermove", e=>{
   }
   joystick.dx = dx; joystick.dy = dy;
 });
-function stopJoystick(e){
-  if (e) e.preventDefault();
-  joystick.active = false; joystick.dx=0; joystick.dy=0;
-}
+function stopJoystick(e){ if (e) e.preventDefault(); joystick.active = false; joystick.dx=0; joystick.dy=0; }
 canvas.addEventListener("pointerup", stopJoystick);
 canvas.addEventListener("pointercancel", stopJoystick);
 canvas.addEventListener("pointerleave", e=>{
@@ -948,7 +909,7 @@ window.addEventListener("resize", resize);
 resize();
 
 /* --------------------------------------------------------------
-   DIALOGUE KEY CONTROL (E / e)
+   DIALOGUE KEY CONTROL (E/e)
 -------------------------------------------------------------- */
 window.addEventListener("keydown", e=>{
   if (e.key.toLowerCase() !== "e") return;
@@ -990,11 +951,11 @@ window.addEventListener("load", async ()=>{
    SERVICE WORKER (optional)
 -------------------------------------------------------------- */
 if ("serviceWorker" in navigator){
-  navigator.serviceWorker.register("sw.js").catch(e=>console.warn("SW registration failed:",e));
+  navigator.serviceWorker.register("sw.js").catch(e=>console.warn("SW registration failed:", e));
 }
 
 /* --------------------------------------------------------------
-   DEBUG EXPORTS (so you can call from console)
+   DEBUG EXPORTS
 -------------------------------------------------------------- */
 window.startGame = startGame;
 window.advanceKingDialogue = advanceKingDialogue;
