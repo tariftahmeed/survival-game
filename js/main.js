@@ -1,15 +1,16 @@
-/*================================================================
-   MAIN.JS – “Hungry Reds” (single‑file version)
-   --------------------------------------------------------------
-   FIXED:
-   • Robust sprite‑sheet rectangle calculation – always returns a
-     single cell even when the JSON descriptor is missing keys.
-   • No more runtime error that stopped the whole game.
-================================================================*/
+/* ==============================================================
+   MAIN.JS - Hungry Reds
+
+   Sprite handling:
+   - Reads individual sprite images from chars.json.
+   - Does not crop chars.png into 64 x 64 rectangles.
+   - Each animation frame displays exactly one sprite.
+============================================================== */
 
 /* --------------------------------------------------------------
-   IMPORTS – Firebase CDN
+   FIREBASE IMPORTS
 -------------------------------------------------------------- */
+
 import { initializeApp } from
   "https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js";
 
@@ -30,134 +31,244 @@ import { firebaseConfig } from "./firebase-config.js";
 /* --------------------------------------------------------------
    FIREBASE SETUP
 -------------------------------------------------------------- */
-const app   = initializeApp(firebaseConfig);
-const db    = getFirestore(app);
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
 const scoresCol = collection(db, "survivalScores");
 
 /* --------------------------------------------------------------
-   CANVAS & CONTEXT
+   CANVAS
 -------------------------------------------------------------- */
+
 const canvas = document.getElementById("game");
-const ctx    = canvas.getContext("2d");
+const ctx = canvas.getContext("2d");
+
+ctx.imageSmoothingEnabled = false;
 
 /* --------------------------------------------------------------
-   SPRITE‑SHEET LOADER & FRAME HELPER
+   SPRITE SETTINGS
+
+   chars.json contains 73 individual images:
+
+   sprite_1.png  -> array index 0
+   sprite_2.png  -> array index 1
+   ...
+   sprite_73.png -> array index 72
+
+   Based on the visible grouping in the supplied sprite sheet:
+
+   0-22  = small orange character
+   23-45 = armored character
+   46-68 = green character
+   69-72 = small green creature
+
+   Start with four frames per animated character. The arrays can
+   later be changed if different rows should be used.
 -------------------------------------------------------------- */
-const spriteSheet = new Image();   // whole PNG
-let sheetInfo = null;              // JSON descriptor (columns, cell size …)
 
-/**
- * Load the PNG and its JSON description.
- * Call once (we do it at page load).
- */
+let sheetInfo = null;
+const spriteImages = [];
+
+/*
+   These are zero-based sprite indexes.
+
+   For example:
+   0 means sprite_1.png
+   23 means sprite_24.png
+   46 means sprite_47.png
+   69 means sprite_70.png
+*/
+
+const spriteAnimations = {
+  player: [0, 1, 2, 3],
+  king: [23],
+  monster: [46, 47, 48, 49],
+  virus: [69, 70, 71, 72]
+};
+
+/* --------------------------------------------------------------
+   LOAD SPRITES FROM JSON
+-------------------------------------------------------------- */
+
 async function loadSpriteSheet() {
-  // 1️⃣ PNG
-  spriteSheet.src = "assets/sprites/chars.png";
-
-  // 2️⃣ JSON descriptor
-  const resp = await fetch("assets/sprites/chars.json");
-  sheetInfo = await resp.json();
-
-  // 3️⃣ Wait for image to finish loading
-  await new Promise((resolve, reject) => {
-    spriteSheet.onload  = resolve;
-    spriteSheet.onerror = reject;
+  const response = await fetch("assets/sprites/chars.json", {
+    cache: "no-store"
   });
 
-  // 4️⃣ Keep the canvas pixel‑perfect (no smoothing)
+  if (!response.ok) {
+    throw new Error(
+      `Could not load chars.json. HTTP status: ${response.status}`
+    );
+  }
+
+  sheetInfo = await response.json();
+
+  const sprites = sheetInfo?.layers
+    ?.flatMap(layer => layer.sprites ?? []);
+
+  if (!Array.isArray(sprites) || sprites.length === 0) {
+    throw new Error(
+      "chars.json does not contain any sprites."
+    );
+  }
+
+  await Promise.all(
+    sprites.map((spriteData, index) => {
+      return new Promise((resolve, reject) => {
+        const image = new Image();
+
+        image.onload = () => {
+          spriteImages[index] = image;
+          resolve();
+        };
+
+        image.onerror = () => {
+          reject(
+            new Error(
+              `Could not load ${spriteData.name ?? `sprite ${index + 1}`}`
+            )
+          );
+        };
+
+        image.src = spriteData.base64;
+      });
+    })
+  );
+
   ctx.imageSmoothingEnabled = false;
-}
 
-/**
- * Return the source rectangle for a given character + frame.
- *
- * @param {"king"|"player"|"monster"|"virus"} name
- * @param {number} frameIdx – zero‑based column (0 … columns‑1)
- * @returns {{sx:number, sy:number, w:number, h:number}}
- */
-function getFrameRect(name, frameIdx = 0) {
-  if (!sheetInfo) throw new Error("Sprite sheet not loaded yet");
+  console.log(
+    `Loaded ${spriteImages.length} individual sprite images.`
+  );
 
-  /* -------------------------------------------------------------
-     Determine the cell size.
-     The JSON may provide any of the following keys – we support
-     them all and fall back to a safe 64 px square when nothing is
-     found.
-  ------------------------------------------------------------- */
-  const cellW =
-    sheetInfo.frameWidth ??
-    sheetInfo.manualCellWidth ??
-    sheetInfo.cellWidth ??
-    sheetInfo.width ??
-    64;                               // <- safe fallback
-
-  const cellH =
-    sheetInfo.frameHeight ??
-    sheetInfo.manualCellHeight ??
-    sheetInfo.cellHeight ??
-    sheetInfo.height ??
-    64;                               // <- safe fallback
-
-  // -------------------------------------------------------------
-  // Columns – use the JSON value if present; otherwise infer from
-  // the image dimensions (only after the image has loaded).
-  // -------------------------------------------------------------
-  const columns = (function () {
-    if (Number.isFinite(sheetInfo.columns) && sheetInfo.columns > 0) {
-      return sheetInfo.columns;
-    }
-    // spriteSheet.width is now known because loadSpriteSheet() awaited onload
-    const inferred = Math.floor(spriteSheet.width / cellW);
-    return inferred > 0 ? inferred : 1;
-  })();
-
-  // -------------------------------------------------------------
-  // Row mapping – the sheet order is fixed.
-  // -------------------------------------------------------------
-  const rowMap = {
-    king:    0,
-    player:  1,
-    monster: 2,
-    virus:   3
-  };
-  const row = rowMap[name];
-  if (row === undefined) throw new Error(`Unknown sprite name "${name}"`);
-
-  // Wrap column index safely.
-  const col = ((frameIdx % columns) + columns) % columns;
-
-  return {
-    sx: col * cellW,
-    sy: row * cellH,
-    w : cellW,
-    h : cellH
-  };
-}
-
-/**
- * Draw a sprite frame.
- *
- * @param {string} name        – character name
- * @param {number} frameIdx    – zero‑based column
- * @param {number} dx, dy      – destination on canvas
- * @param {number} [dw],[dh]   – optional draw size (defaults to cell size)
- */
-function drawSprite(name, frameIdx, dx, dy, dw = null, dh = null) {
-  const src = getFrameRect(name, frameIdx);
-  dw ??= src.w;
-  dh ??= src.h;
-  ctx.drawImage(
-    spriteSheet,
-    src.sx, src.sy, src.w, src.h,
-    dx, dy, dw, dh
+  console.table(
+    sprites.map((sprite, index) => ({
+      index,
+      filename: sprite.name,
+      width: sprite.width,
+      height: sprite.height
+    }))
   );
 }
 
 /* --------------------------------------------------------------
-   GAME STATE & GLOBALS
+   SPRITE HELPERS
 -------------------------------------------------------------- */
-let player;                // will hold animation data as well
-let enemies = [];          // each enemy gets its own anim data
+
+function getAnimationFrameCount(name) {
+  const animation = spriteAnimations[name];
+
+  if (!Array.isArray(animation) || animation.length === 0) {
+    return 1;
+  }
+
+  return animation.length;
+}
+
+function getSpriteImage(name, frameIndex = 0) {
+  const animation = spriteAnimations[name];
+
+  if (!Array.isArray(animation) || animation.length === 0) {
+    console.warn(`No sprite animation defined for "${name}".`);
+    return null;
+  }
+
+  const safeFrame = Number.isFinite(frameIndex)
+    ? Math.floor(frameIndex)
+    : 0;
+
+  const wrappedFrame =
+    ((safeFrame % animation.length) + animation.length) %
+    animation.length;
+
+  const spriteIndex = animation[wrappedFrame];
+  const image = spriteImages[spriteIndex];
+
+  if (!image) {
+    console.warn(
+      `Sprite ${spriteIndex + 1} for "${name}" has not loaded.`
+    );
+
+    return null;
+  }
+
+  return image;
+}
+
+/*
+   Draws one individual sprite.
+
+   The sprite:
+   - keeps its original aspect ratio;
+   - is centered horizontally;
+   - is aligned to the bottom of its game rectangle;
+   - is enlarged using nearest-neighbour rendering.
+*/
+
+function drawSprite(
+  name,
+  frameIndex,
+  dx,
+  dy,
+  dw = 64,
+  dh = 64
+) {
+  const image = getSpriteImage(name, frameIndex);
+
+  if (!image) return;
+
+  const sourceWidth =
+    image.naturalWidth || image.width;
+
+  const sourceHeight =
+    image.naturalHeight || image.height;
+
+  if (sourceWidth <= 0 || sourceHeight <= 0) {
+    return;
+  }
+
+  const scale = Math.min(
+    dw / sourceWidth,
+    dh / sourceHeight
+  );
+
+  const drawWidth = Math.max(
+    1,
+    Math.round(sourceWidth * scale)
+  );
+
+  const drawHeight = Math.max(
+    1,
+    Math.round(sourceHeight * scale)
+  );
+
+  const drawX = Math.round(
+    dx + (dw - drawWidth) / 2
+  );
+
+  const drawY = Math.round(
+    dy + dh - drawHeight
+  );
+
+  ctx.drawImage(
+    image,
+    0,
+    0,
+    sourceWidth,
+    sourceHeight,
+    drawX,
+    drawY,
+    drawWidth,
+    drawHeight
+  );
+}
+
+/* --------------------------------------------------------------
+   GAME STATE
+-------------------------------------------------------------- */
+
+let player;
+let enemies = [];
 let killEffects = [];
 
 let kills = 0;
@@ -168,20 +279,22 @@ let running = false;
 let gamePaused = false;
 let pageHidden = false;
 
-let anim = null;          // requestAnimationFrame handle
+let anim = null;
 let playerName = "";
 let dlgBtn = null;
 
 /* --------------------------------------------------------------
-   BUILDING UNLOCK STATE
+   BUILDING STATE
 -------------------------------------------------------------- */
+
 let buildingCAdded = false;
 let buildingDAdded = false;
 
 /* --------------------------------------------------------------
-   PLAYER HEALTH SETTINGS
+   PLAYER HEALTH
 -------------------------------------------------------------- */
-const MAX_HEALTH   = 3;
+
+const MAX_HEALTH = 3;
 const INVULN_TIME = 800;
 
 let playerHealth = MAX_HEALTH;
@@ -191,21 +304,23 @@ let playerInvuln = 0;
 /* --------------------------------------------------------------
    ENEMY SETTINGS
 -------------------------------------------------------------- */
-const NORMAL_ENEMY_SPAWN_INTERVAL = 1200;
-const GERM_ENEMY_SPAWN_INTERVAL   = 1500;
 
-const NORMAL_ENEMY_SIZE  = 64;    // all sprites draw at the cell size
+const NORMAL_ENEMY_SPAWN_INTERVAL = 1200;
+const GERM_ENEMY_SPAWN_INTERVAL = 1500;
+
+const NORMAL_ENEMY_SIZE = 64;
 const NORMAL_ENEMY_SPEED = 1.6;
 
-const GERM_START_SIZE   = 64;
-const GERM_MAX_SIZE     = 90;
-const GERM_START_SPEED  = 1.35;
+const GERM_START_SIZE = 64;
+const GERM_MAX_SIZE = 90;
+const GERM_START_SPEED = 1.35;
 const GERM_START_HEALTH = 2;
 
 /* --------------------------------------------------------------
    JOYSTICK
 -------------------------------------------------------------- */
-let joystick = {
+
+const joystick = {
   active: false,
   baseX: 0,
   baseY: 0,
@@ -215,8 +330,9 @@ let joystick = {
 };
 
 /* --------------------------------------------------------------
-   KING NPC (static portrait, optional dialogue)
+   KING
 -------------------------------------------------------------- */
+
 const king = {
   x: 0,
   y: 0,
@@ -238,8 +354,9 @@ const king = {
 };
 
 /* --------------------------------------------------------------
-   FIREBASE: RECORD PLAY SESSION
+   FIREBASE FUNCTIONS
 -------------------------------------------------------------- */
+
 async function recordPlaySession(name, score) {
   try {
     await addDoc(scoresCol, {
@@ -247,69 +364,104 @@ async function recordPlaySession(name, score) {
       score,
       playedAt: serverTimestamp()
     });
-  } catch (e) {
-    console.warn("Failed to write play session:", e);
+  } catch (error) {
+    console.warn(
+      "Failed to write play session:",
+      error
+    );
   }
 }
 
-/* --------------------------------------------------------------
-   FIREBASE: FETCH TOP‑3
--------------------------------------------------------------- */
 async function fetchTop3() {
   try {
-    const q = query(scoresCol, orderBy("score", "desc"), limit(3));
-    const snapshot = await getDocs(q);
+    const scoreQuery = query(
+      scoresCol,
+      orderBy("score", "desc"),
+      limit(3)
+    );
+
+    const snapshot = await getDocs(scoreQuery);
     const list = [];
-    snapshot.forEach(doc => {
-      const d = doc.data();
-      list.push({ name: d.name, score: d.score });
+
+    snapshot.forEach(documentSnapshot => {
+      const data = documentSnapshot.data();
+
+      list.push({
+        name: data.name,
+        score: data.score
+      });
     });
+
     return list;
-  } catch (e) {
-    console.warn("Failed to fetch leaderboard:", e);
+  } catch (error) {
+    console.warn(
+      "Failed to fetch leaderboard:",
+      error
+    );
+
     return [];
   }
 }
 
-/* --------------------------------------------------------------
-   FIREBASE: UPDATE LEADERBOARD UI
--------------------------------------------------------------- */
 async function refreshLeaderboard() {
-  const top = await fetchTop3();
-  const leaderboard = document.getElementById("topList");
+  const topPlayers = await fetchTop3();
+  const leaderboard =
+    document.getElementById("topList");
+
   if (!leaderboard) return;
+
   leaderboard.innerHTML = "";
-  top.forEach(entry => {
-    const li = document.createElement("li");
-    li.textContent = `${entry.name}: ${entry.score}`;
-    leaderboard.appendChild(li);
+
+  topPlayers.forEach(entry => {
+    const item = document.createElement("li");
+
+    item.textContent =
+      `${entry.name}: ${entry.score}`;
+
+    leaderboard.appendChild(item);
   });
 }
 
 /* --------------------------------------------------------------
-   PLAYER NAME (local storage)
+   PLAYER NAME
 -------------------------------------------------------------- */
+
 function askForName() {
-  const stored = localStorage.getItem("survivalPlayerName");
-  if (stored) {
-    playerName = stored;
+  const storedName =
+    localStorage.getItem("survivalPlayerName");
+
+  if (storedName) {
+    playerName = storedName;
   } else {
-    let entered = "";
-    while (!entered.trim()) {
-      entered = prompt(
-        "Enter your name. It will appear on the global leaderboard."
-      ) || "";
+    let enteredName = "";
+
+    while (!enteredName.trim()) {
+      enteredName =
+        prompt(
+          "Enter your name. It will appear on the global leaderboard."
+        ) || "";
     }
-    playerName = entered.trim();
-    localStorage.setItem("survivalPlayerName", playerName);
+
+    playerName = enteredName.trim();
+
+    localStorage.setItem(
+      "survivalPlayerName",
+      playerName
+    );
   }
-  const el = document.getElementById("playerName");
-  if (el) el.textContent = playerName;
+
+  const playerNameElement =
+    document.getElementById("playerName");
+
+  if (playerNameElement) {
+    playerNameElement.textContent = playerName;
+  }
 }
 
 /* --------------------------------------------------------------
-   COLLISION HELPER – AABB test
+   COLLISION
 -------------------------------------------------------------- */
+
 function rectanglesTouch(a, b) {
   return (
     a.x < b.x + b.w &&
@@ -320,94 +472,148 @@ function rectanglesTouch(a, b) {
 }
 
 /* --------------------------------------------------------------
-   RANDOM EDGE SPAWN POSITION
+   RANDOM EDGE POSITION
 -------------------------------------------------------------- */
+
 function getEdgeSpawnPosition(size) {
   const side = Math.floor(Math.random() * 4);
-  let x = 0, y = 0;
-  if (side === 0) {                     // top
-    x = Math.random() * Math.max(1, canvas.width - size);
+
+  let x = 0;
+  let y = 0;
+
+  if (side === 0) {
+    x =
+      Math.random() *
+      Math.max(1, canvas.width - size);
+
     y = -size;
-  }
-  if (side === 1) {                     // right
+  } else if (side === 1) {
     x = canvas.width + size;
-    y = Math.random() * Math.max(1, canvas.height - size);
-  }
-  if (side === 2) {                     // bottom
-    x = Math.random() * Math.max(1, canvas.width - size);
+
+    y =
+      Math.random() *
+      Math.max(1, canvas.height - size);
+  } else if (side === 2) {
+    x =
+      Math.random() *
+      Math.max(1, canvas.width - size);
+
     y = canvas.height + size;
-  }
-  if (side === 3) {                     // left
+  } else {
     x = -size;
-    y = Math.random() * Math.max(1, canvas.height - size);
+
+    y =
+      Math.random() *
+      Math.max(1, canvas.height - size);
   }
+
   return { x, y };
 }
 
 /* --------------------------------------------------------------
-   SPAWN NORMAL ENEMY (monster sprite)
+   ENEMY SPAWNING
 -------------------------------------------------------------- */
+
 function spawnEnemy() {
-  const pos = getEdgeSpawnPosition(NORMAL_ENEMY_SIZE);
+  const position =
+    getEdgeSpawnPosition(NORMAL_ENEMY_SIZE);
+
   enemies.push({
     type: "normal",
-    x: pos.x,
-    y: pos.y,
+
+    x: position.x,
+    y: position.y,
+
     w: NORMAL_ENEMY_SIZE,
     h: NORMAL_ENEMY_SIZE,
+
     s: NORMAL_ENEMY_SPEED,
 
-    // ---- animation data ---------------------------------------------
     animTimer: 0,
     animFrame: 0,
     animFps: 6,
-    animFrames: sheetInfo ? (sheetInfo.columns ?? 1) : 4
+    animFrames:
+      getAnimationFrameCount("monster")
   });
 }
 
-/* --------------------------------------------------------------
-   SPAWN GERM ENEMY (virus sprite)
--------------------------------------------------------------- */
 function spawnGermEnemy() {
-  const pos = getEdgeSpawnPosition(GERM_START_SIZE);
+  const position =
+    getEdgeSpawnPosition(GERM_START_SIZE);
+
   enemies.push({
     type: "germ",
-    x: pos.x,
-    y: pos.y,
+
+    x: position.x,
+    y: position.y,
+
     w: GERM_START_SIZE,
     h: GERM_START_SIZE,
+
     s: GERM_START_SPEED,
 
     health: GERM_START_HEALTH,
+    initialHealth: GERM_START_HEALTH,
     maxSize: GERM_MAX_SIZE,
 
-    // ---- animation data ---------------------------------------------
     animTimer: 0,
     animFrame: 0,
     animFps: 8,
-    animFrames: sheetInfo ? (sheetInfo.columns ?? 1) : 4
+    animFrames:
+      getAnimationFrameCount("virus")
   });
 }
 
 /* --------------------------------------------------------------
-   ROOM DEFINITIONS
+   ROOMS
 -------------------------------------------------------------- */
+
 const rooms = {
   world: {
     name: "World",
     bg: "#4caf50",
+
     doors: [
-      { id: "buildingA", x: 30, y: 540, w: 80, h: 80, target: "buildingA", emoji: "🏠" },
-      { id: "buildingB", x: 380, y: 20, w: 80, h: 80, target: "buildingB", emoji: "🏢" }
+      {
+        id: "buildingA",
+        x: 30,
+        y: 540,
+        w: 80,
+        h: 80,
+        target: "buildingA",
+        emoji: "🏠"
+      },
+      {
+        id: "buildingB",
+        x: 380,
+        y: 20,
+        w: 80,
+        h: 80,
+        target: "buildingB",
+        emoji: "🏢"
+      }
     ],
+
     spawnEnemy() {}
   },
 
   buildingA: {
     name: "Building A",
     bg: "#8b4513",
-    doors: [{ x: 200, y: 660, w: 80, h: 80, target: "world", emoji: "🚪" }],
+
+    doors: [
+      {
+        x: 200,
+        y: 660,
+        w: 80,
+        h: 80,
+        target: "world",
+        emoji: "🚪"
+      }
+    ],
+
     spawnEnemy() {},
+
     decor: [
       { x: 150, y: 300, emoji: "🪑" },
       { x: 230, y: 300, emoji: "🪑" },
@@ -418,6 +624,7 @@ const rooms = {
   buildingB: {
     name: "Building B",
     bg: "#3b5998",
+
     doors: [
       {
         x: 200,
@@ -431,403 +638,733 @@ const rooms = {
         showLock: true
       }
     ],
-    spawnEnemy() { spawnEnemy(); }
+
+    spawnEnemy() {
+      spawnEnemy();
+    }
   },
 
   buildingC: {
     name: "Building C",
     bg: "#d1e8f0",
-    doors: [{ x: 200, y: 660, w: 80, h: 80, target: "world", emoji: "🚪" }],
+
+    doors: [
+      {
+        x: 200,
+        y: 660,
+        w: 80,
+        h: 80,
+        target: "world",
+        emoji: "🚪"
+      }
+    ],
+
     spawnEnemy() {}
   },
 
   buildingD: {
     name: "Building D",
     bg: "#403050",
-    doors: [{ x: 200, y: 660, w: 80, h: 80, target: "world", emoji: "🚪" }],
-    spawnEnemy() { spawnGermEnemy(); }
+
+    doors: [
+      {
+        x: 200,
+        y: 660,
+        w: 80,
+        h: 80,
+        target: "world",
+        emoji: "🚪"
+      }
+    ],
+
+    spawnEnemy() {
+      spawnGermEnemy();
+    }
   }
 };
 
 let currentRoom = rooms.world;
 
 /* --------------------------------------------------------------
-   RESET WORLD BUILDINGS (remove dynamic doors)
+   RESET
 -------------------------------------------------------------- */
+
 function resetWorldBuildings() {
-  rooms.world.doors = rooms.world.doors.filter(
-    d => d.id !== "buildingC" && d.id !== "buildingD"
-  );
+  rooms.world.doors =
+    rooms.world.doors.filter(
+      door =>
+        door.id !== "buildingC" &&
+        door.id !== "buildingD"
+    );
+
   buildingCAdded = false;
   buildingDAdded = false;
 }
 
-/* --------------------------------------------------------------
-   FULL GAME RESET (called on new game / retry)
--------------------------------------------------------------- */
 function reset() {
   resetWorldBuildings();
+
   currentRoom = rooms.world;
 
-  // ---------- PLAYER ----------
   player = {
     x: 220,
     y: 330,
+
     w: 64,
     h: 64,
+
     speed: 4.5,
     flashTimer: 0,
 
-    // animation
     animTimer: 0,
     animFrame: 0,
     animFps: 8,
-    animFrames: sheetInfo ? (sheetInfo.columns ?? 1) : 4
+    animFrames:
+      getAnimationFrameCount("player")
   };
 
-  // ---------- ENEMIES ----------
   enemies = [];
   killEffects = [];
 
-  // ---------- SCORE & HEALTH ----------
   kills = 0;
+
   playerHealth = MAX_HEALTH;
   showHealthBar = false;
   playerInvuln = 0;
 
-  // ---------- TIMERS ----------
   lastSpawn = 0;
   lastTime = 0;
 
-  // ---------- STATE ----------
   running = false;
   gamePaused = false;
   pageHidden = document.hidden;
 
-  // ---------- JOYSTICK ----------
   joystick.active = false;
   joystick.dx = 0;
   joystick.dy = 0;
 
-  // ---------- KING ----------
   king.currentLine = 0;
   king.active = false;
   king.placed = false;
   king.talked = false;
 
-  const dlgBox = document.getElementById("dialogueBox");
-  if (dlgBox) dlgBox.style.display = "none";
+  const dialogueBox =
+    document.getElementById("dialogueBox");
 
-  const scoreEl = document.getElementById("score");
-  if (scoreEl) scoreEl.textContent = "0";
+  if (dialogueBox) {
+    dialogueBox.style.display = "none";
+  }
+
+  const scoreElement =
+    document.getElementById("score");
+
+  if (scoreElement) {
+    scoreElement.textContent = "0";
+  }
 }
 
 /* --------------------------------------------------------------
-   PLAYER UPDATE (movement + animation)
+   ANIMATION UPDATE HELPER
 -------------------------------------------------------------- */
-function updatePlayer(delta) {
-  if (joystick.active) {
-    const mag = Math.hypot(joystick.dx, joystick.dy);
-    if (mag > 2) {
-      player.x += (joystick.dx / mag) * player.speed;
-      player.y += (joystick.dy / mag) * player.speed;
 
-      // walk animation while moving
-      player.animTimer += delta;
-      const frameDur = 1000 / player.animFps;
-      if (player.animTimer >= frameDur) {
-        player.animTimer -= frameDur;
-        player.animFrame = (player.animFrame + 1) % player.animFrames;
-      }
-    } else {
-      player.animFrame = 0;
-      player.animTimer = 0;
+function updateAnimation(entity, delta) {
+  if (
+    !entity ||
+    entity.animFrames <= 1 ||
+    entity.animFps <= 0
+  ) {
+    if (entity) {
+      entity.animFrame = 0;
+    }
+
+    return;
+  }
+
+  entity.animTimer += delta;
+
+  const frameDuration =
+    1000 / entity.animFps;
+
+  while (entity.animTimer >= frameDuration) {
+    entity.animTimer -= frameDuration;
+
+    entity.animFrame =
+      (entity.animFrame + 1) %
+      entity.animFrames;
+  }
+}
+
+/* --------------------------------------------------------------
+   PLAYER UPDATE
+-------------------------------------------------------------- */
+
+function updatePlayer(delta) {
+  let moving = false;
+
+  if (joystick.active) {
+    const magnitude =
+      Math.hypot(joystick.dx, joystick.dy);
+
+    if (magnitude > 2) {
+      moving = true;
+
+      player.x +=
+        (joystick.dx / magnitude) *
+        player.speed;
+
+      player.y +=
+        (joystick.dy / magnitude) *
+        player.speed;
     }
   }
 
-  // keep inside canvas
-  player.x = Math.max(0, Math.min(canvas.width - player.w, player.x));
-  player.y = Math.max(0, Math.min(canvas.height - player.h, player.y));
+  if (moving) {
+    updateAnimation(player, delta);
+  } else {
+    player.animFrame = 0;
+    player.animTimer = 0;
+  }
+
+  player.x = Math.max(
+    0,
+    Math.min(
+      canvas.width - player.w,
+      player.x
+    )
+  );
+
+  player.y = Math.max(
+    0,
+    Math.min(
+      canvas.height - player.h,
+      player.y
+    )
+  );
 }
 
 /* --------------------------------------------------------------
-   ENEMIES UPDATE (chase + animation)
+   ENEMY UPDATE
 -------------------------------------------------------------- */
+
 function updateEnemies(delta) {
   enemies.forEach(enemy => {
-    const ecx = enemy.x + enemy.w / 2;
-    const ecy = enemy.y + enemy.h / 2;
-    const pcx = player.x + player.w / 2;
-    const pcy = player.y + player.h / 2;
-    const dx = pcx - ecx;
-    const dy = pcy - ecy;
-    const dist = Math.hypot(dx, dy) || 1;
-    enemy.x += (dx / dist) * enemy.s;
-    enemy.y += (dy / dist) * enemy.s;
+    const enemyCenterX =
+      enemy.x + enemy.w / 2;
 
-    // animation tick
-    enemy.animTimer += delta;
-    const frameDur = 1000 / enemy.animFps;
-    if (enemy.animTimer >= frameDur) {
-      enemy.animTimer -= frameDur;
-      enemy.animFrame = (enemy.animFrame + 1) % enemy.animFrames;
-    }
+    const enemyCenterY =
+      enemy.y + enemy.h / 2;
+
+    const playerCenterX =
+      player.x + player.w / 2;
+
+    const playerCenterY =
+      player.y + player.h / 2;
+
+    const differenceX =
+      playerCenterX - enemyCenterX;
+
+    const differenceY =
+      playerCenterY - enemyCenterY;
+
+    const distance =
+      Math.hypot(
+        differenceX,
+        differenceY
+      ) || 1;
+
+    enemy.x +=
+      (differenceX / distance) *
+      enemy.s;
+
+    enemy.y +=
+      (differenceY / distance) *
+      enemy.s;
+
+    updateAnimation(enemy, delta);
   });
 }
 
 /* --------------------------------------------------------------
-   CREATE / UPDATE / DRAW KILL‑EFFECTS (visual ✖️)
+   VISUAL EFFECTS
 -------------------------------------------------------------- */
-function createEffect(x, y, emoji, duration = 250) {
-  killEffects.push({ x, y, emoji, ttl: duration, maxTtl: duration });
+
+function createEffect(
+  x,
+  y,
+  emoji,
+  duration = 250
+) {
+  killEffects.push({
+    x,
+    y,
+    emoji,
+    ttl: duration,
+    maxTtl: duration
+  });
 }
+
 function updateKillEffects(delta) {
-  for (let i = killEffects.length - 1; i >= 0; i--) {
-    const e = killEffects[i];
-    e.ttl -= delta;
-    if (e.ttl <= 0) killEffects.splice(i, 1);
+  for (
+    let index = killEffects.length - 1;
+    index >= 0;
+    index--
+  ) {
+    killEffects[index].ttl -= delta;
+
+    if (killEffects[index].ttl <= 0) {
+      killEffects.splice(index, 1);
+    }
   }
 }
+
 function drawKillEffects() {
   ctx.save();
+
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.font = "32px Arial";
-  killEffects.forEach(e => {
-    ctx.globalAlpha = Math.max(0, e.ttl / e.maxTtl);
-    ctx.fillText(e.emoji || "⚔️", e.x, e.y);
+
+  killEffects.forEach(effect => {
+    ctx.globalAlpha = Math.max(
+      0,
+      effect.ttl / effect.maxTtl
+    );
+
+    ctx.fillText(
+      effect.emoji || "⚔️",
+      effect.x,
+      effect.y
+    );
   });
+
   ctx.restore();
 }
 
 /* --------------------------------------------------------------
-   ENEMY‑ENEMY COLLISIONS (kill‑swap logic)
+   ENEMY COLLISIONS
 -------------------------------------------------------------- */
+
 function handleEnemyCollisions() {
   const toRemove = new Set();
 
-  for (let i = 0; i < enemies.length; i++) {
-    for (let j = i + 1; j < enemies.length; j++) {
-      const a = enemies[i];
-      const b = enemies[j];
-      if (!rectanglesTouch(a, b)) continue;
-
-      // normal‑normal → both die
-      if (a.type === "normal" && b.type === "normal") {
-        const midX = (a.x + b.x) / 2 + a.w / 2;
-        const midY = (a.y + b.y) / 2 + a.h / 2;
-        toRemove.add(i);
-        toRemove.add(j);
-        kills++;
-        createEffect(midX, midY, "⚔️", 250);
+  for (
+    let firstIndex = 0;
+    firstIndex < enemies.length;
+    firstIndex++
+  ) {
+    for (
+      let secondIndex = firstIndex + 1;
+      secondIndex < enemies.length;
+      secondIndex++
+    ) {
+      if (
+        toRemove.has(firstIndex) ||
+        toRemove.has(secondIndex)
+      ) {
         continue;
       }
 
-      // germ‑germ (absorption)
-      if (a.type === "germ" && b.type === "germ") {
-        let absorber, absorbed, absorbedIdx;
-        if (a.w >= b.w) {
-          absorber = a; absorbed = b; absorbedIdx = j;
+      const first = enemies[firstIndex];
+      const second = enemies[secondIndex];
+
+      if (!rectanglesTouch(first, second)) {
+        continue;
+      }
+
+      if (
+        first.type === "normal" &&
+        second.type === "normal"
+      ) {
+        const effectX =
+          (first.x + second.x) / 2 +
+          first.w / 2;
+
+        const effectY =
+          (first.y + second.y) / 2 +
+          first.h / 2;
+
+        toRemove.add(firstIndex);
+        toRemove.add(secondIndex);
+
+        kills++;
+
+        createEffect(
+          effectX,
+          effectY,
+          "⚔️",
+          250
+        );
+
+        continue;
+      }
+
+      if (
+        first.type === "germ" &&
+        second.type === "germ"
+      ) {
+        let absorber;
+        let absorbed;
+        let absorbedIndex;
+
+        if (first.w >= second.w) {
+          absorber = first;
+          absorbed = second;
+          absorbedIndex = secondIndex;
         } else {
-          absorber = b; absorbed = a; absorbedIdx = i;
+          absorber = second;
+          absorbed = first;
+          absorbedIndex = firstIndex;
         }
 
-        const centerX = absorber.x + absorber.w / 2;
-        const centerY = absorber.y + absorber.h / 2;
-        const growth = Math.max(5, absorbed.w * 0.28);
-        const newSize = Math.min(absorber.maxSize, absorber.w + growth);
+        const centerX =
+          absorber.x + absorber.w / 2;
+
+        const centerY =
+          absorber.y + absorber.h / 2;
+
+        const growth = Math.max(
+          5,
+          absorbed.w * 0.28
+        );
+
+        const newSize = Math.min(
+          absorber.maxSize,
+          absorber.w + growth
+        );
+
         absorber.w = newSize;
         absorber.h = newSize;
-        absorber.x = centerX - newSize / 2;
-        absorber.y = centerY - newSize / 2;
 
-        if (absorber.h === absorber.maxSize) {
-          const deathX = absorber.x + absorber.w / 2;
-          const deathY = absorber.y + absorber.h / 2;
-          enemies.splice(i, 1);
+        absorber.x =
+          centerX - newSize / 2;
+
+        absorber.y =
+          centerY - newSize / 2;
+
+        if (newSize >= absorber.maxSize) {
+          toRemove.add(
+            enemies.indexOf(absorber)
+          );
+
           kills += 100;
-          createEffect(deathX, deathY, "☠️", 350);
+
+          createEffect(
+            centerX,
+            centerY,
+            "☠️",
+            350
+          );
         } else {
-          absorber.health += Math.max(1, Math.ceil(absorbed.health * 0.5));
+          absorber.health += Math.max(
+            1,
+            Math.ceil(absorbed.health * 0.5)
+          );
         }
 
         absorber.s = Math.max(
           0.65,
-          GERM_START_SPEED - (newSize - GERM_START_SIZE) * 0.009
+          GERM_START_SPEED -
+          (newSize - GERM_START_SIZE) *
+          0.009
         );
-        toRemove.add(absorbedIdx);
-        createEffect(absorber.x + absorber.w / 2, absorber.y + absorber.h / 2, "🧬", 300);
-        continue;
+
+        toRemove.add(absorbedIndex);
+
+        createEffect(
+          absorber.x + absorber.w / 2,
+          absorber.y + absorber.h / 2,
+          "🧬",
+          300
+        );
       }
     }
   }
 
-  enemies = enemies.filter((_, i) => !toRemove.has(i));
+  enemies = enemies.filter(
+    (_, index) => !toRemove.has(index)
+  );
 }
 
 /* --------------------------------------------------------------
-   DRAW HEALTH BAR (shown after king dialogue)
+   HEALTH
 -------------------------------------------------------------- */
+
 function drawHealthBar() {
   if (!showHealthBar) return;
-  const barW = 200,
-        barH = 20;
-  const x = (canvas.width - barW) / 2;
+
+  const barWidth = 200;
+  const barHeight = 20;
+
+  const x =
+    (canvas.width - barWidth) / 2;
+
   const y = 12;
-  const healthPct = Math.max(0, playerHealth / MAX_HEALTH);
+
+  const healthPercentage = Math.max(
+    0,
+    playerHealth / MAX_HEALTH
+  );
 
   ctx.save();
+
   ctx.fillStyle = "#555";
-  ctx.fillRect(x, y, barW, barH);
-  ctx.fillStyle = "#0f0";
-  ctx.fillRect(x, y, barW * healthPct, barH);
-  ctx.strokeStyle = "#fff";
+  ctx.fillRect(
+    x,
+    y,
+    barWidth,
+    barHeight
+  );
+
+  ctx.fillStyle = "#00ff00";
+  ctx.fillRect(
+    x,
+    y,
+    barWidth * healthPercentage,
+    barHeight
+  );
+
+  ctx.strokeStyle = "#ffffff";
   ctx.lineWidth = 2;
-  ctx.strokeRect(x, y, barW, barH);
+
+  ctx.strokeRect(
+    x,
+    y,
+    barWidth,
+    barHeight
+  );
+
   ctx.font = "14px Arial";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillStyle = "#fff";
-  ctx.fillText(`${Math.max(0, playerHealth)} / ${MAX_HEALTH}`, canvas.width / 2, y + barH / 2);
+  ctx.fillStyle = "#ffffff";
+
+  ctx.fillText(
+    `${Math.max(0, playerHealth)} / ${MAX_HEALTH}`,
+    canvas.width / 2,
+    y + barHeight / 2
+  );
+
   ctx.restore();
 }
 
-/* --------------------------------------------------------------
-   PUSH GERM AWAY FROM PLAYER (on hit)
--------------------------------------------------------------- */
 function pushGermAwayFromPlayer(germ) {
-  const pcx = player.x + player.w / 2;
-  const pcy = player.y + player.h / 2;
-  const gcx = germ.x + germ.w / 2;
-  const gcy = germ.y + germ.h / 2;
-  let dx = gcx - pcx;
-  let dy = gcy - pcy;
-  let d = Math.hypot(dx, dy);
-  if (d === 0) {
-    dx = Math.random() - 0.5;
-    dy = Math.random() - 0.5;
-    d = Math.hypot(dx, dy) || 1;
+  const playerCenterX =
+    player.x + player.w / 2;
+
+  const playerCenterY =
+    player.y + player.h / 2;
+
+  const germCenterX =
+    germ.x + germ.w / 2;
+
+  const germCenterY =
+    germ.y + germ.h / 2;
+
+  let differenceX =
+    germCenterX - playerCenterX;
+
+  let differenceY =
+    germCenterY - playerCenterY;
+
+  let distance =
+    Math.hypot(
+      differenceX,
+      differenceY
+    );
+
+  if (distance === 0) {
+    differenceX = Math.random() - 0.5;
+    differenceY = Math.random() - 0.5;
+
+    distance =
+      Math.hypot(
+        differenceX,
+        differenceY
+      ) || 1;
   }
-  germ.x += (dx / d) * 30;
-  germ.y += (dy / d) * 30;
+
+  germ.x +=
+    (differenceX / distance) * 30;
+
+  germ.y +=
+    (differenceY / distance) * 30;
 }
 
-/* --------------------------------------------------------------
-   DAMAGE PLAYER & GERM COLLISIONS
--------------------------------------------------------------- */
 function damagePlayer(delta) {
   if (!showHealthBar) return;
 
   if (playerInvuln > 0) {
-    playerInvuln = Math.max(0, playerInvuln - delta);
+    playerInvuln = Math.max(
+      0,
+      playerInvuln - delta
+    );
+
     return;
   }
 
-  for (let i = enemies.length - 1; i >= 0; i--) {
-    const enemy = enemies[i];
-    if (!rectanglesTouch(player, enemy)) continue;
+  for (
+    let index = enemies.length - 1;
+    index >= 0;
+    index--
+  ) {
+    const enemy = enemies[index];
 
-    // player hit
+    if (!rectanglesTouch(player, enemy)) {
+      continue;
+    }
+
     playerHealth--;
-    playerInvuln   = INVULN_TIME;
+    playerInvuln = INVULN_TIME;
     player.flashTimer = INVULN_TIME;
 
-    // extra logic if the enemy is a germ
     if (enemy.type === "germ") {
       enemy.health--;
-      createEffect(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, "💥", 220);
+
+      createEffect(
+        enemy.x + enemy.w / 2,
+        enemy.y + enemy.h / 2,
+        "💥",
+        220
+      );
+
       if (enemy.health <= 0) {
-        const deathX = enemy.x + enemy.w / 2;
-        const deathY = enemy.y + enemy.h / 2;
-        enemies.splice(i, 1);
+        const deathX =
+          enemy.x + enemy.w / 2;
+
+        const deathY =
+          enemy.y + enemy.h / 2;
+
+        enemies.splice(index, 1);
         kills += 10;
-        createEffect(deathX, deathY, "☠️", 350);
+
+        createEffect(
+          deathX,
+          deathY,
+          "☠️",
+          350
+        );
       } else {
         pushGermAwayFromPlayer(enemy);
       }
     }
 
-    // only one enemy damages the player per invulnerability period
     break;
   }
 }
 
-/* --------------------------------------------------------------
-   INSTANT‑DEATH COLLISION (used before health bar appears)
--------------------------------------------------------------- */
 function collide() {
-  return enemies.some(e => rectanglesTouch(player, e));
+  return enemies.some(
+    enemy =>
+      rectanglesTouch(player, enemy)
+  );
 }
 
 /* --------------------------------------------------------------
-   BUILDING UNLOCK LOGIC
+   BUILDING UNLOCKS
 -------------------------------------------------------------- */
+
 function maybeAddBuildingC() {
-  if (buildingCAdded) return;
-  if (kills < 10) return;
+  if (buildingCAdded || kills < 10) {
+    return;
+  }
+
   rooms.world.doors.push({
     id: "buildingC",
-    x: 200, y: 140, w: 80, h: 80,
+    x: 200,
+    y: 140,
+    w: 80,
+    h: 80,
     target: "buildingC",
     emoji: "🏰"
   });
+
   buildingCAdded = true;
 }
+
 function maybeAddBuildingD() {
-  if (buildingDAdded) return;
-  if (!showHealthBar) return;
+  if (
+    buildingDAdded ||
+    !showHealthBar
+  ) {
+    return;
+  }
+
   rooms.world.doors.push({
     id: "buildingD",
-    x: 350, y: 300, w: 80, h: 80,
+    x: 350,
+    y: 300,
+    w: 80,
+    h: 80,
     target: "buildingD",
     emoji: "🏥"
   });
+
   buildingDAdded = true;
 }
 
 /* --------------------------------------------------------------
-   PLACE KING (once when entering building C)
+   KING PLACEMENT
 -------------------------------------------------------------- */
+
 function maybePlaceKing() {
   if (king.placed) return;
-  king.x = canvas.width / 2 - king.w / 2;
-  king.y = canvas.height / 2 - king.h / 2 - 250;
+
+  king.x =
+    canvas.width / 2 - king.w / 2;
+
+  king.y =
+    canvas.height / 2 -
+    king.h / 2 -
+    250;
+
   king.placed = true;
 }
 
 /* --------------------------------------------------------------
-   CHANGE ROOM (door entry)
+   ROOMS AND DOORS
 -------------------------------------------------------------- */
+
 function enterRoom(targetRoomName) {
-  const targetRoom = rooms[targetRoomName];
+  const targetRoom =
+    rooms[targetRoomName];
+
   if (!targetRoom) return;
 
   currentRoom = targetRoom;
+
   enemies = [];
   lastSpawn = 0;
 
-  player.x = canvas.width / 2 - player.w / 2;
-  player.y = canvas.height / 2 - player.h / 2;
+  player.x =
+    canvas.width / 2 - player.w / 2;
+
+  player.y =
+    canvas.height / 2 - player.h / 2;
 
   joystick.active = false;
   joystick.dx = 0;
   joystick.dy = 0;
 
-  if (currentRoom === rooms.buildingC) maybePlaceKing();
+  if (currentRoom === rooms.buildingC) {
+    maybePlaceKing();
+  }
+
   if (currentRoom === rooms.world) {
     king.talked = false;
+
     maybeAddBuildingC();
     maybeAddBuildingD();
   }
 }
 
-/* --------------------------------------------------------------
-   DOOR COLLISION CHECK
--------------------------------------------------------------- */
 function checkDoorCollision() {
   for (const door of currentRoom.doors) {
-    const unlocked = !door.requiredKills || kills >= door.requiredKills;
+    const unlocked =
+      !door.requiredKills ||
+      kills >= door.requiredKills;
+
     if (!unlocked) continue;
+
     if (rectanglesTouch(player, door)) {
       enterRoom(door.target);
       return;
@@ -835,80 +1372,142 @@ function checkDoorCollision() {
   }
 }
 
-/* --------------------------------------------------------------
-   SPAWN INTERVAL HELPERS
--------------------------------------------------------------- */
 function getCurrentSpawnInterval() {
-  return currentRoom === rooms.buildingD ? GERM_ENEMY_SPAWN_INTERVAL
-                                        : NORMAL_ENEMY_SPAWN_INTERVAL;
+  if (currentRoom === rooms.buildingD) {
+    return GERM_ENEMY_SPAWN_INTERVAL;
+  }
+
+  return NORMAL_ENEMY_SPAWN_INTERVAL;
 }
 
 /* --------------------------------------------------------------
-   DRAW BACKGROUND GRID (debug)
+   DRAW BACKGROUND
 -------------------------------------------------------------- */
+
 function drawGrid() {
   ctx.save();
-  ctx.strokeStyle = "rgba(255,255,255,0.08)";
+
+  ctx.strokeStyle =
+    "rgba(255,255,255,0.08)";
+
   ctx.lineWidth = 1;
-  for (let x = 0; x < canvas.width; x += 40) {
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+
+  for (
+    let x = 0;
+    x < canvas.width;
+    x += 40
+  ) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, canvas.height);
+    ctx.stroke();
   }
-  for (let y = 0; y < canvas.height; y += 40) {
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+
+  for (
+    let y = 0;
+    y < canvas.height;
+    y += 40
+  ) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(canvas.width, y);
+    ctx.stroke();
   }
+
   ctx.restore();
 }
 
 /* --------------------------------------------------------------
-   DRAW DOORS (still using emoji – replace later if you add sprites)
+   DRAW DOORS
 -------------------------------------------------------------- */
+
 function drawDoors() {
   currentRoom.doors.forEach(door => {
-    const unlocked = !door.requiredKills || kills >= door.requiredKills;
+    const unlocked =
+      !door.requiredKills ||
+      kills >= door.requiredKills;
+
     ctx.save();
+
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
 
     if (unlocked) {
       ctx.font = "48px Arial";
-      ctx.fillStyle = "#fff";
-      ctx.fillText(door.emoji || "🚪", door.x + door.w / 2, door.y + door.h / 2);
+      ctx.fillStyle = "#ffffff";
+
+      ctx.fillText(
+        door.emoji || "🚪",
+        door.x + door.w / 2,
+        door.y + door.h / 2
+      );
     } else {
       ctx.globalAlpha = 0.7;
       ctx.font = "48px Arial";
-      ctx.fillText(door.lockedEmoji || "🔒", door.x + door.w / 2, door.y + door.h / 2);
+
+      ctx.fillText(
+        door.lockedEmoji || "🔒",
+        door.x + door.w / 2,
+        door.y + door.h / 2
+      );
+
       ctx.globalAlpha = 1;
+
       if (door.showLock) {
         ctx.font = "20px Arial";
         ctx.fillStyle = "#ffcc00";
-        ctx.fillText(String(door.requiredKills), door.x + door.w / 2, door.y + door.h + 14);
+
+        ctx.fillText(
+          String(door.requiredKills),
+          door.x + door.w / 2,
+          door.y + door.h + 14
+        );
       }
     }
+
     ctx.restore();
   });
 }
 
 /* --------------------------------------------------------------
-   DRAW DECORATIONS (still emoji)
+   DRAW DECOR
 -------------------------------------------------------------- */
+
 function drawDecor() {
   if (!currentRoom.decor) return;
+
   ctx.save();
+
   ctx.font = "36px Arial";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  currentRoom.decor.forEach(item => ctx.fillText(item.emoji, item.x, item.y));
+
+  currentRoom.decor.forEach(item => {
+    ctx.fillText(
+      item.emoji,
+      item.x,
+      item.y
+    );
+  });
+
   ctx.restore();
 }
 
 /* --------------------------------------------------------------
-   DRAW PLAYER (sprite)
+   DRAW CHARACTERS
 -------------------------------------------------------------- */
+
 function drawPlayer() {
   ctx.save();
+
   if (player.flashTimer > 0) {
-    const flashing = Math.floor(player.flashTimer / 100) % 2 === 0;
-    ctx.globalAlpha = flashing ? 0.35 : 1;
+    const flashing =
+      Math.floor(
+        player.flashTimer / 100
+      ) % 2 === 0;
+
+    ctx.globalAlpha =
+      flashing ? 0.35 : 1;
   }
 
   drawSprite(
@@ -919,58 +1518,124 @@ function drawPlayer() {
     player.w,
     player.h
   );
+
   ctx.restore();
 }
 
-/* --------------------------------------------------------------
-   DRAW KING (static portrait)
--------------------------------------------------------------- */
 function drawKing() {
-  if (currentRoom !== rooms.buildingC) return;
-  ctx.save();
-  drawSprite("king", 0, king.x, king.y, king.w, king.h);
-  ctx.restore();
+  if (currentRoom !== rooms.buildingC) {
+    return;
+  }
+
+  drawSprite(
+    "king",
+    0,
+    king.x,
+    king.y,
+    king.w,
+    king.h
+  );
 }
 
-/* --------------------------------------------------------------
-   DRAW ENEMIES (monster or virus sprite + health bar for germs)
--------------------------------------------------------------- */
 function drawEnemies() {
   enemies.forEach(enemy => {
     ctx.save();
-    const spriteName = enemy.type === "germ" ? "virus" : "monster";
-    drawSprite(spriteName, enemy.animFrame, enemy.x, enemy.y, enemy.w, enemy.h);
 
-    // health bar for germs
+    const spriteName =
+      enemy.type === "germ"
+        ? "virus"
+        : "monster";
+
+    drawSprite(
+      spriteName,
+      enemy.animFrame,
+      enemy.x,
+      enemy.y,
+      enemy.w,
+      enemy.h
+    );
+
     if (enemy.type === "germ") {
-      const barW = Math.max(24, Math.min(enemy.w, 70));
-      const maxHealth = Math.max(GERM_START_HEALTH, enemy.health);
-      const ratio = Math.min(1, enemy.health / maxHealth);
-      const barX = enemy.x + enemy.w / 2 - barW / 2;
+      const barWidth = Math.max(
+        24,
+        Math.min(enemy.w, 70)
+      );
+
+      const maximumHealth = Math.max(
+        enemy.initialHealth,
+        enemy.health
+      );
+
+      const healthRatio = Math.max(
+        0,
+        Math.min(
+          1,
+          enemy.health / maximumHealth
+        )
+      );
+
+      const barX =
+        enemy.x +
+        enemy.w / 2 -
+        barWidth / 2;
+
       const barY = enemy.y - 8;
-      ctx.fillStyle = "rgba(0,0,0,0.55)";
-      ctx.fillRect(barX, barY, barW, 5);
+
+      ctx.fillStyle =
+        "rgba(0,0,0,0.55)";
+
+      ctx.fillRect(
+        barX,
+        barY,
+        barWidth,
+        5
+      );
+
       ctx.fillStyle = "#aaff55";
-      ctx.fillRect(barX, barY, barW * ratio, 5);
+
+      ctx.fillRect(
+        barX,
+        barY,
+        barWidth * healthRatio,
+        5
+      );
     }
+
     ctx.restore();
   });
 }
 
 /* --------------------------------------------------------------
-   DRAW JOYSTICK (visual aid)
+   DRAW JOYSTICK
 -------------------------------------------------------------- */
+
 function drawJoystick() {
   if (!joystick.active) return;
+
   ctx.save();
+
   ctx.beginPath();
-  ctx.strokeStyle = "rgba(255,255,255,0.4)";
+
+  ctx.strokeStyle =
+    "rgba(255,255,255,0.4)";
+
   ctx.lineWidth = 3;
-  ctx.arc(joystick.baseX, joystick.baseY, 40, 0, Math.PI * 2);
+
+  ctx.arc(
+    joystick.baseX,
+    joystick.baseY,
+    40,
+    0,
+    Math.PI * 2
+  );
+
   ctx.stroke();
 
   ctx.beginPath();
-  ctx.fillStyle = "rgba(255,255,255,0.5)";
+
+  ctx.fillStyle =
+    "rgba(255,255,255,0.5)";
+
   ctx.arc(
     joystick.baseX + joystick.dx,
     joystick.baseY + joystick.dy,
@@ -978,30 +1643,57 @@ function drawJoystick() {
     0,
     Math.PI * 2
   );
+
   ctx.fill();
+
   ctx.restore();
 }
 
 /* --------------------------------------------------------------
-   DRAW ROOM NAME (debug)
+   DRAW ROOM NAME
 -------------------------------------------------------------- */
+
 function drawRoomName() {
   ctx.save();
+
   ctx.font = "18px Arial";
   ctx.textAlign = "left";
   ctx.textBaseline = "top";
-  ctx.fillStyle = "rgba(255,255,255,0.9)";
-  ctx.fillText(currentRoom.name, 12, 42);
+
+  ctx.fillStyle =
+    "rgba(255,255,255,0.9)";
+
+  ctx.fillText(
+    currentRoom.name,
+    12,
+    42
+  );
+
   ctx.restore();
 }
 
 /* --------------------------------------------------------------
-   DRAW EVERYTHING (order matters)
+   DRAW EVERYTHING
 -------------------------------------------------------------- */
+
 function draw() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.imageSmoothingEnabled = false;
+
+  ctx.clearRect(
+    0,
+    0,
+    canvas.width,
+    canvas.height
+  );
+
   ctx.fillStyle = currentRoom.bg;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.fillRect(
+    0,
+    0,
+    canvas.width,
+    canvas.height
+  );
 
   drawGrid();
   drawDoors();
@@ -1016,41 +1708,68 @@ function draw() {
 }
 
 /* --------------------------------------------------------------
-   KING DIALOGUE (opens UI, pauses game)
+   KING DIALOGUE
 -------------------------------------------------------------- */
+
 function startKingDialogue() {
-  const dlgBox  = document.getElementById("dialogueBox");
-  const line    = document.getElementById("dialogueLine");
-  if (!dlgBox || !line || !dlgBtn) return;
+  const dialogueBox =
+    document.getElementById("dialogueBox");
+
+  const dialogueLine =
+    document.getElementById("dialogueLine");
+
+  if (
+    !dialogueBox ||
+    !dialogueLine ||
+    !dlgBtn
+  ) {
+    return;
+  }
 
   king.currentLine = 0;
   king.active = true;
   king.talked = true;
 
-  line.textContent = king.dialogueLines[0];
-  dlgBox.style.display = "flex";
+  dialogueLine.textContent =
+    king.dialogueLines[0];
+
+  dialogueBox.style.display = "flex";
   dlgBtn.textContent = "Next";
 
   gamePaused = true;
+
   joystick.active = false;
   joystick.dx = 0;
   joystick.dy = 0;
 }
 
-/* --------------------------------------------------------------
-   ADVANCE KING DIALOGUE (called by the button)
--------------------------------------------------------------- */
 function advanceKingDialogue() {
   if (!king.active) return;
+
   king.currentLine++;
 
-  const dlgBox = document.getElementById("dialogueBox");
-  const line   = document.getElementById("dialogueLine");
-  if (king.currentLine >= king.dialogueLines.length) {
-    dlgBox.style.display = "none";
+  const dialogueBox =
+    document.getElementById("dialogueBox");
+
+  const dialogueLine =
+    document.getElementById("dialogueLine");
+
+  if (!dialogueBox || !dialogueLine) {
+    return;
+  }
+
+  if (
+    king.currentLine >=
+    king.dialogueLines.length
+  ) {
+    dialogueBox.style.display = "none";
+
     gamePaused = false;
     king.active = false;
-    dlgBtn.textContent = "Next";
+
+    if (dlgBtn) {
+      dlgBtn.textContent = "Next";
+    }
 
     showHealthBar = true;
     playerHealth = MAX_HEALTH;
@@ -1059,102 +1778,167 @@ function advanceKingDialogue() {
     maybeAddBuildingD();
 
     lastTime = performance.now();
+
     return;
   }
 
-  line.textContent = king.dialogueLines[king.currentLine];
-  dlgBtn.textContent = (king.currentLine === king.dialogueLines.length - 1) ? "Close" : "Next";
+  dialogueLine.textContent =
+    king.dialogueLines[
+      king.currentLine
+    ];
+
+  if (dlgBtn) {
+    dlgBtn.textContent =
+      king.currentLine ===
+      king.dialogueLines.length - 1
+        ? "Close"
+        : "Next";
+  }
 }
 
-/* --------------------------------------------------------------
-   CHECK KING PROXIMITY (opens dialogue automatically)
--------------------------------------------------------------- */
 function checkKingProximity() {
-  if (currentRoom !== rooms.buildingC) return;
-  if (king.active) return;
+  if (
+    currentRoom !== rooms.buildingC ||
+    king.active
+  ) {
+    return;
+  }
 
-  const kcx = king.x + king.w / 2;
-  const kcy = king.y + king.h / 2;
-  const pcx = player.x + player.w / 2;
-  const pcy = player.y + player.h / 2;
-  const dist = Math.hypot(kcx - pcx, kcy - pcy);
+  const kingCenterX =
+    king.x + king.w / 2;
+
+  const kingCenterY =
+    king.y + king.h / 2;
+
+  const playerCenterX =
+    player.x + player.w / 2;
+
+  const playerCenterY =
+    player.y + player.h / 2;
+
+  const distance = Math.hypot(
+    kingCenterX - playerCenterX,
+    kingCenterY - playerCenterY
+  );
+
   const talkRange = 80;
 
-  if (dist < talkRange && !king.talked) {
+  if (
+    distance < talkRange &&
+    !king.talked
+  ) {
     startKingDialogue();
   }
-  if (dist >= talkRange) king.talked = false;
+
+  if (distance >= talkRange) {
+    king.talked = false;
+  }
 }
 
 /* --------------------------------------------------------------
-   END GAME (show overlay)
+   GAME OVER
 -------------------------------------------------------------- */
+
 function endGame(message) {
   running = false;
-  if (anim !== null) { cancelAnimationFrame(anim); anim = null; }
+
+  if (anim !== null) {
+    cancelAnimationFrame(anim);
+    anim = null;
+  }
 
   joystick.active = false;
   joystick.dx = 0;
   joystick.dy = 0;
 
-  const finalEl = document.getElementById("final");
-  const overlay = document.getElementById("overlay");
-  if (finalEl) finalEl.innerHTML = message;
-  if (overlay) overlay.style.display = "flex";
+  const finalElement =
+    document.getElementById("final");
+
+  const overlay =
+    document.getElementById("overlay");
+
+  if (finalElement) {
+    finalElement.innerHTML = message;
+  }
+
+  if (overlay) {
+    overlay.style.display = "flex";
+  }
 }
 
-/* --------------------------------------------------------------
-   PROCESS GAME OVER (record & leaderboard)
--------------------------------------------------------------- */
 function processGameOver() {
   const finalScore = kills;
-  endGame(`You scored ${finalScore}.<br>Hint: You need certain points to proceed in the game.`);
-  recordPlaySession(playerName, finalScore);
+
+  endGame(
+    `You scored ${finalScore}.<br>` +
+    "Hint: You need certain points to proceed in the game."
+  );
+
+  recordPlaySession(
+    playerName,
+    finalScore
+  );
+
   refreshLeaderboard();
 }
 
 /* --------------------------------------------------------------
-   MAIN GAME LOOP (requestAnimationFrame)
+   GAME LOOP
 -------------------------------------------------------------- */
+
 function loop(timestamp) {
   if (!running) return;
 
-  // frozen while dialogue UI is open or page is hidden
   if (gamePaused || pageHidden) {
     lastTime = timestamp;
     anim = requestAnimationFrame(loop);
     return;
   }
 
-  if (!lastTime) lastTime = timestamp;
-  const delta = Math.min(timestamp - lastTime, 50);
+  if (!lastTime) {
+    lastTime = timestamp;
+  }
+
+  const delta = Math.min(
+    timestamp - lastTime,
+    50
+  );
+
   lastTime = timestamp;
 
-  // flash‑timer decay
-  if (player.flashTimer > 0) player.flashTimer = Math.max(0, player.flashTimer - delta);
+  if (player.flashTimer > 0) {
+    player.flashTimer = Math.max(
+      0,
+      player.flashTimer - delta
+    );
+  }
 
-  // UI score update
-  const scoreEl = document.getElementById("score");
-  if (scoreEl) scoreEl.textContent = String(kills);
+  const scoreElement =
+    document.getElementById("score");
 
-  // 1️⃣ UNLOCKS
+  if (scoreElement) {
+    scoreElement.textContent =
+      String(kills);
+  }
+
   maybeAddBuildingC();
   maybeAddBuildingD();
 
-  // 2️⃣ SPAWN ENEMIES
-  if (timestamp - lastSpawn > getCurrentSpawnInterval()) {
+  if (
+    timestamp - lastSpawn >
+    getCurrentSpawnInterval()
+  ) {
     currentRoom.spawnEnemy();
     lastSpawn = timestamp;
   }
 
-  // 3️⃣ UPDATE LOGIC
   updatePlayer(delta);
   updateEnemies(delta);
+
   handleEnemyCollisions();
   updateKillEffects(delta);
   checkDoorCollision();
 
-  // 4️⃣ DAMAGE / DEATH
   if (showHealthBar) {
     damagePlayer(delta);
   } else if (collide()) {
@@ -1162,185 +1946,392 @@ function loop(timestamp) {
     return;
   }
 
-  // 5️⃣ KING PROXIMITY
   checkKingProximity();
 
-  // 6️⃣ END‑OF‑GAME (health reaches 0)
-  if (showHealthBar && playerHealth <= 0) {
+  if (
+    showHealthBar &&
+    playerHealth <= 0
+  ) {
     processGameOver();
     return;
   }
 
-  // 7️⃣ DRAW
   draw();
 
   anim = requestAnimationFrame(loop);
 }
 
 /* --------------------------------------------------------------
-   START / RESTART GAME
+   START GAME
 -------------------------------------------------------------- */
+
 function startGame() {
-  if (!playerName) askForName();
+  if (!playerName) {
+    askForName();
+  }
 
-  const overlay = document.getElementById("overlay");
-  if (overlay) overlay.style.display = "none";
+  const overlay =
+    document.getElementById("overlay");
 
-  if (anim !== null) { cancelAnimationFrame(anim); anim = null; }
+  if (overlay) {
+    overlay.style.display = "none";
+  }
+
+  if (anim !== null) {
+    cancelAnimationFrame(anim);
+    anim = null;
+  }
 
   reset();
+
   running = true;
 
   lastTime = performance.now();
   lastSpawn = lastTime;
 
-  draw();                     // immediate first frame
+  draw();
+
   anim = requestAnimationFrame(loop);
 }
 
 /* --------------------------------------------------------------
-   POINTER POSITION (helper for joystick)
+   POINTER POSITION
 -------------------------------------------------------------- */
+
 function getPointerPosition(event) {
-  const rect = canvas.getBoundingClientRect();
+  const rectangle =
+    canvas.getBoundingClientRect();
+
   return {
-    x: (event.clientX - rect.left) * canvas.width  / rect.width,
-    y: (event.clientY - rect.top)  * canvas.height / rect.height
+    x:
+      (event.clientX - rectangle.left) *
+      canvas.width /
+      rectangle.width,
+
+    y:
+      (event.clientY - rectangle.top) *
+      canvas.height /
+      rectangle.height
   };
 }
 
 /* --------------------------------------------------------------
-   JOYSTICK – POINTER HANDLERS
+   JOYSTICK EVENTS
 -------------------------------------------------------------- */
-canvas.addEventListener("pointerdown", e => {
-  if (!running || gamePaused || pageHidden) return;
-  e.preventDefault();
-  const pos = getPointerPosition(e);
-  joystick.active = true;
-  joystick.baseX = pos.x;
-  joystick.baseY = pos.y;
-  joystick.dx = 0;
-  joystick.dy = 0;
-  if (canvas.setPointerCapture) {
-    try { canvas.setPointerCapture(e.pointerId); }
-    catch (err) { console.warn("setPointerCapture failed:", err); }
-  }
-});
 
-canvas.addEventListener("pointermove", e => {
-  if (!joystick.active) return;
-  e.preventDefault();
-  const pos = getPointerPosition(e);
-  let dx = pos.x - joystick.baseX;
-  let dy = pos.y - joystick.baseY;
-  const d = Math.hypot(dx, dy);
-  if (d > joystick.max) {
-    dx = (dx / d) * joystick.max;
-    dy = (dy / d) * joystick.max;
-  }
-  joystick.dx = dx;
-  joystick.dy = dy;
-});
+canvas.addEventListener(
+  "pointerdown",
+  event => {
+    if (
+      !running ||
+      gamePaused ||
+      pageHidden
+    ) {
+      return;
+    }
 
-function stopJoystick(e) {
-  if (e) e.preventDefault();
+    event.preventDefault();
+
+    const position =
+      getPointerPosition(event);
+
+    joystick.active = true;
+    joystick.baseX = position.x;
+    joystick.baseY = position.y;
+    joystick.dx = 0;
+    joystick.dy = 0;
+
+    if (canvas.setPointerCapture) {
+      try {
+        canvas.setPointerCapture(
+          event.pointerId
+        );
+      } catch (error) {
+        console.warn(
+          "setPointerCapture failed:",
+          error
+        );
+      }
+    }
+  }
+);
+
+canvas.addEventListener(
+  "pointermove",
+  event => {
+    if (!joystick.active) return;
+
+    event.preventDefault();
+
+    const position =
+      getPointerPosition(event);
+
+    let differenceX =
+      position.x - joystick.baseX;
+
+    let differenceY =
+      position.y - joystick.baseY;
+
+    const distance =
+      Math.hypot(
+        differenceX,
+        differenceY
+      );
+
+    if (distance > joystick.max) {
+      differenceX =
+        (differenceX / distance) *
+        joystick.max;
+
+      differenceY =
+        (differenceY / distance) *
+        joystick.max;
+    }
+
+    joystick.dx = differenceX;
+    joystick.dy = differenceY;
+  }
+);
+
+function stopJoystick(event) {
+  if (event) {
+    event.preventDefault();
+  }
+
   joystick.active = false;
   joystick.dx = 0;
   joystick.dy = 0;
 }
-canvas.addEventListener("pointerup",      stopJoystick);
-canvas.addEventListener("pointercancel", stopJoystick);
-canvas.addEventListener("pointerleave", e => {
-  if (e.buttons === 0 || e.pointerType === "mouse") stopJoystick(e);
-});
+
+canvas.addEventListener(
+  "pointerup",
+  stopJoystick
+);
+
+canvas.addEventListener(
+  "pointercancel",
+  stopJoystick
+);
+
+canvas.addEventListener(
+  "pointerleave",
+  event => {
+    if (
+      event.buttons === 0 ||
+      event.pointerType === "mouse"
+    ) {
+      stopJoystick(event);
+    }
+  }
+);
 
 /* --------------------------------------------------------------
-   PAGE VISIBILITY – pause when tab hidden
+   VISIBILITY
 -------------------------------------------------------------- */
-document.addEventListener("visibilitychange", () => {
-  pageHidden = document.hidden;
-  joystick.active = false;
-  joystick.dx = 0;
-  joystick.dy = 0;
-  if (!pageHidden) {
+
+document.addEventListener(
+  "visibilitychange",
+  () => {
+    pageHidden = document.hidden;
+
+    joystick.active = false;
+    joystick.dx = 0;
+    joystick.dy = 0;
+
+    if (!pageHidden) {
+      lastTime = performance.now();
+      lastSpawn = lastTime;
+    }
+  }
+);
+
+window.addEventListener(
+  "blur",
+  () => {
+    pageHidden = true;
+
+    joystick.active = false;
+    joystick.dx = 0;
+    joystick.dy = 0;
+  }
+);
+
+window.addEventListener(
+  "focus",
+  () => {
+    pageHidden = document.hidden;
+
     lastTime = performance.now();
     lastSpawn = lastTime;
   }
-});
-window.addEventListener("blur", () => {
-  pageHidden = true;
-  joystick.active = false;
-  joystick.dx = 0;
-  joystick.dy = 0;
-});
-window.addEventListener("focus", () => {
-  pageHidden = document.hidden;
-  lastTime = performance.now();
-  lastSpawn = lastTime;
-});
+);
 
 /* --------------------------------------------------------------
-   KEEP CANVAS ASPECT RATIO (responsive)
+   RESPONSIVE CANVAS
 -------------------------------------------------------------- */
+
 function resize() {
-  const maxW = Math.min(window.innerWidth, 540);
-  canvas.style.width  = `${maxW}px`;
-  canvas.style.height = `${maxW * 1170 / 540}px`;
+  const maximumWidth = Math.min(
+    window.innerWidth,
+    540
+  );
+
+  canvas.style.width =
+    `${maximumWidth}px`;
+
+  canvas.style.height =
+    `${maximumWidth * 1170 / 540}px`;
+
+  ctx.imageSmoothingEnabled = false;
 }
-window.addEventListener("resize", resize);
+
+window.addEventListener(
+  "resize",
+  resize
+);
+
 resize();
 
 /* --------------------------------------------------------------
-   KEYBOARD FALLBACK (E key to advance dialog)
+   KEYBOARD DIALOGUE CONTROL
 -------------------------------------------------------------- */
-window.addEventListener("keydown", e => {
-  if ((e.key !== "e" && e.key !== "E")) return;
-  const dlgBox = document.getElementById("dialogueBox");
-  if (dlgBox && dlgBox.style.display !== "none") advanceKingDialogue();
-});
 
-/* --------------------------------------------------------------
-   PAGE LOAD – initialise everything
--------------------------------------------------------------- */
-window.addEventListener("load", async () => {
-  // 1️⃣ Load sprite‑sheet (must happen before any draw)
-  await loadSpriteSheet();
+window.addEventListener(
+  "keydown",
+  event => {
+    if (
+      event.key !== "e" &&
+      event.key !== "E"
+    ) {
+      return;
+    }
 
-  // 2️⃣ Restore stored player name (if any)
-  const stored = localStorage.getItem("survivalPlayerName");
-  if (stored) {
-    playerName = stored;
-    const el = document.getElementById("playerName");
-    if (el) el.textContent = playerName;
+    const dialogueBox =
+      document.getElementById("dialogueBox");
+
+    if (
+      dialogueBox &&
+      dialogueBox.style.display !== "none"
+    ) {
+      advanceKingDialogue();
+    }
   }
-
-  // 3️⃣ Hide dialogue box and hook its button
-  const dlgBox = document.getElementById("dialogueBox");
-  if (dlgBox) dlgBox.style.display = "none";
-
-  dlgBtn = document.getElementById("dialogueNext");
-  if (dlgBtn) dlgBtn.addEventListener("click", advanceKingDialogue);
-
-  // 4️⃣ Hook retry button
-  const retry = document.getElementById("retry");
-  if (retry) retry.addEventListener("click", startGame);
-
-  // 5️⃣ Populate leaderboard and start the first game
-  await refreshLeaderboard();
-  startGame();
-});
+);
 
 /* --------------------------------------------------------------
-   SERVICE WORKER (optional)
+   PAGE INITIALIZATION
 -------------------------------------------------------------- */
+
+window.addEventListener(
+  "load",
+  async () => {
+    try {
+      await loadSpriteSheet();
+
+      const storedName =
+        localStorage.getItem(
+          "survivalPlayerName"
+        );
+
+      if (storedName) {
+        playerName = storedName;
+
+        const playerNameElement =
+          document.getElementById(
+            "playerName"
+          );
+
+        if (playerNameElement) {
+          playerNameElement.textContent =
+            playerName;
+        }
+      }
+
+      const dialogueBox =
+        document.getElementById(
+          "dialogueBox"
+        );
+
+      if (dialogueBox) {
+        dialogueBox.style.display =
+          "none";
+      }
+
+      dlgBtn =
+        document.getElementById(
+          "dialogueNext"
+        );
+
+      if (dlgBtn) {
+        dlgBtn.addEventListener(
+          "click",
+          advanceKingDialogue
+        );
+      }
+
+      const retryButton =
+        document.getElementById("retry");
+
+      if (retryButton) {
+        retryButton.addEventListener(
+          "click",
+          startGame
+        );
+      }
+
+      await refreshLeaderboard();
+
+      startGame();
+    } catch (error) {
+      console.error(
+        "Game initialization failed:",
+        error
+      );
+
+      const finalElement =
+        document.getElementById("final");
+
+      const overlay =
+        document.getElementById("overlay");
+
+      if (finalElement) {
+        finalElement.textContent =
+          "The sprites could not be loaded. " +
+          "Open the browser console for details.";
+      }
+
+      if (overlay) {
+        overlay.style.display = "flex";
+      }
+    }
+  }
+);
+
+/* --------------------------------------------------------------
+   SERVICE WORKER
+-------------------------------------------------------------- */
+
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker
     .register("sw.js")
-    .catch(e => console.warn("Service worker registration failed:", e));
+    .catch(error => {
+      console.warn(
+        "Service worker registration failed:",
+        error
+      );
+    });
 }
 
 /* --------------------------------------------------------------
-   OPTIONAL – expose functions for debugging (e.g. console)
+   DEBUG ACCESS
 -------------------------------------------------------------- */
+
 window.startGame = startGame;
-window.advanceKingDialogue = advanceKingDialogue;
+
+window.advanceKingDialogue =
+  advanceKingDialogue;
+
+window.spriteImages = spriteImages;
+
+window.spriteAnimations =
+  spriteAnimations;
