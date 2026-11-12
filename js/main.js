@@ -3,10 +3,9 @@
    --------------------------------------------------------------
    FIXED:
    • The sprite‑sheet helper now correctly isolates a single frame.
-   • It works with the JSON descriptor that may contain either
-     manualCell* values or explicit frameWidth/frameHeight.
-   • All draws (player, king, enemies) now use that single‑frame
-     rectangle, so no “6‑image‑block” appears.
+   • It works with every common JSON descriptor layout.
+   • All draws (player, king, enemies) use that single‑frame
+     rectangle, so no “six‑image‑block” appears any more.
 ================================================================*/
 
 /* --------------------------------------------------------------
@@ -45,28 +44,28 @@ const ctx    = canvas.getContext("2d");
 /* --------------------------------------------------------------
    SPRITE‑SHEET LOADER & FRAME HELPER
 -------------------------------------------------------------- */
-const spriteSheet = new Image();   // whole PNG
-let sheetInfo = null;             // JSON descriptor (columns, cell size …)
+const spriteSheet = new Image();           // whole PNG
+let sheetInfo = null;                     // JSON descriptor
 
 /**
  * Load the PNG and its JSON description.
  * Call once (we do it at page load).
  */
 async function loadSpriteSheet() {
-  // ----- 1️⃣  Load the PNG -----------------------------------------
+  // 1️⃣ PNG
   spriteSheet.src = "assets/sprites/chars.png";
 
-  // ----- 2️⃣  Load the JSON -----------------------------------------
+  // 2️⃣ JSON descriptor
   const resp = await fetch("assets/sprites/chars.json");
   sheetInfo = await resp.json();
 
-  // ----- 3️⃣  Wait for image to finish loading ----------------------
+  // 3️⃣ Wait for image to finish loading
   await new Promise((resolve, reject) => {
     spriteSheet.onload  = resolve;
     spriteSheet.onerror = reject;
   });
 
-  // ----- 4️⃣  Keep the canvas pixel‑perfect (no smoothing) ----------
+  // 4️⃣ Keep the canvas pixel‑perfect (no smoothing)
   ctx.imageSmoothingEnabled = false;
 }
 
@@ -80,20 +79,43 @@ async function loadSpriteSheet() {
 function getFrameRect(name, frameIdx = 0) {
   if (!sheetInfo) throw new Error("Sprite sheet not loaded yet");
 
-  /* ----------------------------------------------------------
-     The JSON can expose the cell size in two ways:
-       • manualCellWidth / manualCellHeight  (old format)
-       • frameWidth / frameHeight            (newer, more explicit)
-     We support both.
-  ---------------------------------------------------------- */
-  const cellW = sheetInfo.frameWidth ?? sheetInfo.manualCellWidth;
-  const cellH = sheetInfo.frameHeight ?? sheetInfo.manualCellHeight;
-  const columns = sheetInfo.columns;
+  /* -----------------------------------------------------------------
+     Determine cell size.
+     The JSON may use any of the following keys (different tools):
+        frameWidth / frameHeight
+        manualCellWidth / manualCellHeight
+        cellWidth / cellHeight
+        width / height
+     If none of those exist we fall back to dividing the image size by
+     the column count (assumes a regular grid).
+  ----------------------------------------------------------------- */
+  const cellW =
+    sheetInfo.frameWidth ??
+    sheetInfo.manualCellWidth ??
+    sheetInfo.cellWidth ??
+    sheetInfo.width ??
+    (sheetInfo.columns ? Math.floor(spriteSheet.width / sheetInfo.columns) : 64);
 
-  if (typeof cellW !== "number" || typeof cellH !== "number")
-    throw new Error("Sprite sheet descriptor missing cell dimensions");
+  const cellH =
+    sheetInfo.frameHeight ??
+    sheetInfo.manualCellHeight ??
+    sheetInfo.cellHeight ??
+    sheetInfo.height ??
+    (sheetInfo.columns ? Math.floor(spriteSheet.height / 4) : 64); // 4 rows
 
-  // ---- row mapping – the sheet has exactly this order ----
+  if (!Number.isFinite(cellW) || !Number.isFinite(cellH))
+    throw new Error("Unable to determine sprite cell dimensions");
+
+  // ---------------------------------------------------------------
+  // Columns – use the value from JSON or infer it from the image.
+  // ---------------------------------------------------------------
+  const columns = sheetInfo.columns ??
+                 Math.floor(spriteSheet.width / cellW) ??
+                 1;
+
+  // ---------------------------------------------------------------
+  // Row mapping – the sheet order is fixed.
+  // ---------------------------------------------------------------
   const rowMap = {
     king:    0,
     player:  1,
@@ -103,12 +125,12 @@ function getFrameRect(name, frameIdx = 0) {
   const row = rowMap[name];
   if (row === undefined) throw new Error(`Unknown sprite name "${name}"`);
 
-  // Clamp / wrap the column index so we never read outside the sheet
+  // Wrap column index safely.
   const col = ((frameIdx % columns) + columns) % columns;
 
   return {
     sx: col * cellW,
-    sy: row  * cellH,
+    sy: row * cellH,
     w : cellW,
     h : cellH
   };
@@ -174,7 +196,7 @@ let playerInvuln = 0;
 const NORMAL_ENEMY_SPAWN_INTERVAL = 1200;
 const GERM_ENEMY_SPAWN_INTERVAL   = 1500;
 
-const NORMAL_ENEMY_SIZE  = 64;    // we now draw everything at the cell size
+const NORMAL_ENEMY_SIZE  = 64;    // all sprites draw at the cell size
 const NORMAL_ENEMY_SPEED = 1.6;
 
 const GERM_START_SIZE   = 64;
@@ -341,7 +363,7 @@ function spawnEnemy() {
     animTimer: 0,
     animFrame: 0,
     animFps: 6,
-    animFrames: sheetInfo ? sheetInfo.columns : 4
+    animFrames: sheetInfo ? (sheetInfo.columns ?? 1) : 4
   });
 }
 
@@ -365,7 +387,7 @@ function spawnGermEnemy() {
     animTimer: 0,
     animFrame: 0,
     animFps: 8,
-    animFrames: sheetInfo ? sheetInfo.columns : 4
+    animFrames: sheetInfo ? (sheetInfo.columns ?? 1) : 4
   });
 }
 
@@ -462,7 +484,7 @@ function reset() {
     animTimer: 0,
     animFrame: 0,
     animFps: 8,
-    animFrames: sheetInfo ? sheetInfo.columns : 4
+    animFrames: sheetInfo ? (sheetInfo.columns ?? 1) : 4
   };
 
   // ---------- ENEMIES ----------
@@ -565,10 +587,10 @@ function createEffect(x, y, emoji, duration = 250) {
   killEffects.push({ x, y, emoji, ttl: duration, maxTtl: duration });
 }
 function updateKillEffects(delta) {
-  killEffects.forEach(e => e.ttl -= delta);
-  // filter in‑place (avoid re‑assigning the const)
   for (let i = killEffects.length - 1; i >= 0; i--) {
-    if (killEffects[i].ttl <= 0) killEffects.splice(i, 1);
+    const e = killEffects[i];
+    e.ttl -= delta;
+    if (e.ttl <= 0) killEffects.splice(i, 1);
   }
 }
 function drawKillEffects() {
