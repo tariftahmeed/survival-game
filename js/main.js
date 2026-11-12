@@ -541,7 +541,7 @@ function collide(){ return enemies.some(e=>rectanglesTouch(player,e)); }
    BUILDING UNLOCK LOGIC
 -------------------------------------------------------------- */
 function maybeAddBuildingC(){
-  if (buildingCAdded || kills < 10) return;
+  if (buildingCAdded || kills < 5) return;
   rooms.world.doors.push({id:"buildingC", x:200, y:140, w:80, h:80, target:"buildingC", emoji:"🏰"});
   buildingCAdded = true;
 }
