@@ -43,7 +43,7 @@ const spriteAnimations = {
   /* ---- PLAYER ANIMATION SET (now uses the old MONSTER graphics) ---- */
   player: {
     down:  [46, 47, 48, 49],
-    up:    [46, 47, 48, 49],   // same frame for up
+    up:    [52, 53, 54, 55],   // same frame for up
     left:  [46, 47, 48, 49],   // will be mirrored for left
     right: [46, 47, 48, 49]    // same frame for right
   },
