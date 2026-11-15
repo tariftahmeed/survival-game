@@ -61,7 +61,7 @@ header {
 #leaderboard {
   position: fixed;
   top: 30px;
-  right: 15px;
+  left: 15px;
 
   background: #181818;
   color: #fff;
