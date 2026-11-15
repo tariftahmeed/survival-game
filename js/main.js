@@ -1,5 +1,5 @@
 /* ==============================================================
-   MAIN.JS – Hungry Reds (player ↔ monster sprite swap)
+   MAIN.JS – Hungry Reds (tilemap town + enterable buildings)
    ============================================================== */
 
 /* --------------------------------------------------------------
@@ -40,28 +40,24 @@ ctx.imageSmoothingEnabled = false;
    SPRITE ANIMATION TABLE (direction aware)
 -------------------------------------------------------------- */
 const spriteAnimations = {
-  /* ---- PLAYER ANIMATION SET (now uses the old MONSTER graphics) ---- */
   player: {
     down:  [46, 47, 48, 49],
-    up:    [52, 53, 54, 55],   // same frame for up
-    left:  [46, 47, 48, 49],   // will be mirrored for left
-    right: [46, 47, 48, 49]    // same frame for right
+    up:    [52, 53, 54, 55],
+    left:  [46, 47, 48, 49],
+    right: [46, 47, 48, 49]
   },
-
-  /* ---- MONSTER ANIMATION SET (now uses the old PLAYER graphics) ---- */
   monster: {
     down:  [0, 1, 2, 3],
     up:    [4, 5, 6, 7],
     left:  [8, 9,10,11],
     right: [12,13,14,15]
   },
-
   king:   { down: [23] },
   virus:  { down: [69,70,71,72] }
 };
 
 /* --------------------------------------------------------------
-   SPRITE LOADING
+   SPRITE LOADING (characters)
 -------------------------------------------------------------- */
 let sheetInfo = null;
 const spriteImages = [];
@@ -94,8 +90,8 @@ async function loadSpriteSheet() {
 function getAnimationFrames(name, dir = "down") {
   const entry = spriteAnimations[name];
   if (!entry) { console.warn(`No animation entry for "${name}"`); return [0]; }
-  if (Array.isArray(entry)) return entry;               // backward‑compat
-  return entry[dir] || entry["down"];                  // fallback
+  if (Array.isArray(entry)) return entry;
+  return entry[dir] || entry["down"];
 }
 function getAnimationFrameCount(name, dir = "down") {
   return getAnimationFrames(name, dir).length || 1;
@@ -128,23 +124,157 @@ function drawSprite(name, dir, frameIdx, dx, dy, dw = 64, dh = 64) {
 }
 
 /* --------------------------------------------------------------
+   TILESET (Kenney Tiny Town – tilemap_packed.png)
+   16x16 tiles, 12 columns x 11 rows
+-------------------------------------------------------------- */
+const TILE       = 45;   // tile size on screen (540 / 12 columns)
+const SRC        = 16;   // tile size inside the image
+const SHEET_COLS = 12;   // tile columns in the sheet
+const MAP_COLS   = 12;   // 12 * 45 = 540
+const MAP_ROWS   = 26;   // 26 * 45 = 1170
+
+const townSheet = new Image();
+function loadTownSheet() {
+  return new Promise((resolve, reject) => {
+    townSheet.onload  = resolve;
+    townSheet.onerror = () => reject(new Error("Could not load assets/tiles/town.png"));
+    townSheet.src = "assets/tiles/town.png";
+  });
+}
+
+function drawTile(id, dx, dy, dw = TILE, dh = TILE) {
+  ctx.drawImage(
+    townSheet,
+    (id % SHEET_COLS) * SRC, Math.floor(id / SHEET_COLS) * SRC, SRC, SRC,
+    dx, dy, dw, dh
+  );
+}
+
+/* --------------------------------------------------------------
+   WORLD MAP (ground + solid scenery)
+   . grass   = path   T tree (solid)   b bush (solid)
+   12 columns x 26 rows
+-------------------------------------------------------------- */
+const legend = {
+  ".": { id: 0 },
+  "=": { id: 25 },
+  "T": { id: 28, solid: true },
+  "b": { id: 5,  solid: true }
+};
+
+const worldMap = [
+  "TTTTTTTTTTTT",
+  "T..........T",
+  "T..T....b..T",
+  "T..........T",
+  "T.b......T.T",
+  "T..........T",
+  "T..........T",
+  "T..........T",
+  "T..........T",
+  "T.=......=.T",
+  "T==========T",
+  "T....==....T",
+  "T....==....T",
+  "T....==....T",
+  "T....==....T",
+  "T....==....T",
+  "T....==....T",
+  "T....=====.T",
+  "T....==....T",
+  "T....==....T",
+  "T....==....T",
+  "T....==....T",
+  "T....==....T",
+  "T.=====....T",
+  "T..........T",
+  "TTTTTTTTTTTT"
+];
+
+function drawWorldTiles() {
+  for (let r = 0; r < MAP_ROWS; r++) {
+    for (let c = 0; c < MAP_COLS; c++) {
+      const t = legend[worldMap[r][c]] ?? legend["."];
+      const dx = c * TILE, dy = r * TILE;
+      drawTile(0, dx, dy);                 // grass underneath everything
+      if (t.id !== 0) drawTile(t.id, dx, dy);
+    }
+  }
+}
+
+/* Interior floor: 9-slice of the framed stone floor, tinted per room */
+function drawInteriorFloor() {
+  for (let r = 0; r < MAP_ROWS; r++) {
+    for (let c = 0; c < MAP_COLS; c++) {
+      const row = r === 0 ? 0 : (r === MAP_ROWS - 1 ? 2 : 1);
+      const col = c === 0 ? 0 : (c === MAP_COLS - 1 ? 2 : 1);
+      drawTile(96 + row * 12 + col, c * TILE, r * TILE);
+    }
+  }
+  ctx.save();
+  ctx.globalAlpha = 0.3;
+  ctx.fillStyle = currentRoom.bg;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.restore();
+}
+
+/* --------------------------------------------------------------
+   BUILDINGS (made of tiles; solid body + door trigger)
+   tiles = 3 columns x 3 rows. Middle column of the bottom row is the door.
+-------------------------------------------------------------- */
+function makeBuilding(target, tx, ty, tiles, appears = () => true) {
+  const w = tiles[0].length * TILE;
+  const h = tiles.length * TILE;
+  return {
+    target, tiles, appears,
+    x: tx * TILE, y: ty * TILE, w, h,
+    // solid part: everything except the top (roof) row, so the roof can overlap the player
+    body: { ox: 0, oy: TILE, w, h: h - TILE },
+    // door trigger: straddles the bottom edge of the door tile
+    door: { ox: TILE, oy: h - TILE / 2, w: TILE, h: TILE }
+  };
+}
+
+let kills = 0;
+let showHealthBar = false;
+
+const RED_ROOF  = [[52,53,54],[64,65,66]];
+const GREY_ROOF = [[48,49,50],[60,61,62]];
+
+const buildings = [
+  // A – red house with a plain door
+  makeBuilding("buildingA", 1, 6,  [...RED_ROOF,  [72,85,75]]),
+  // B – red house with a window (monster arena)
+  makeBuilding("buildingB", 8, 14, [...RED_ROOF,  [84,85,75]]),
+  // C – grey castle house (the king), appears after 10 kills
+  makeBuilding("buildingC", 1, 20, [...GREY_ROOF, [88,89,79]], () => kills >= 10),
+  // D – grey house (germs), appears after the king gives you the health bar
+  makeBuilding("buildingD", 8, 6,  [...GREY_ROOF, [76,89,79]], () => showHealthBar)
+];
+
+const bodyRect = b => ({ x: b.x + b.body.ox, y: b.y + b.body.oy, w: b.body.w, h: b.body.h });
+const doorRect = b => ({ x: b.x + b.door.ox, y: b.y + b.door.oy, w: b.door.w, h: b.door.h });
+
+function drawBuilding(b) {
+  b.tiles.forEach((row, r) => row.forEach((id, c) => {
+    drawTile(id, b.x + c * TILE, b.y + r * TILE);
+  }));
+}
+
+/* --------------------------------------------------------------
    GAME STATE
 -------------------------------------------------------------- */
 let player, enemies = [], killEffects = [];
-let kills = 0, lastSpawn = 0, lastTime = 0;
+let lastSpawn = 0, lastTime = 0;
 let running = false, gamePaused = false, pageHidden = false;
 let anim = null, playerName = "", dlgBtn = null;
-
-/* --------------------------------------------------------------
-   BUILDING STATE
--------------------------------------------------------------- */
-let buildingCAdded = false, buildingDAdded = false;
+let debugBoxes = false;
 
 /* --------------------------------------------------------------
    PLAYER HEALTH
 -------------------------------------------------------------- */
 const MAX_HEALTH = 3, INVULN_TIME = 800;
-let playerHealth = MAX_HEALTH, showHealthBar = false, playerInvuln = 0;
+let playerHealth = MAX_HEALTH, playerInvuln = 0;
 
 /* --------------------------------------------------------------
    ENEMY SETTINGS
@@ -227,6 +357,28 @@ function rectanglesTouch(a,b){
   return a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y;
 }
 
+/* Smaller "feet" box used for walls and doors */
+function hitbox() {
+  return { x: player.x + 14, y: player.y + 36, w: player.w - 28, h: player.h - 40 };
+}
+
+/* True if the player's feet box is inside a solid tile or a building body (world only) */
+function blockedAt() {
+  if (currentRoom !== rooms.world) return false;
+  const hb = hitbox();
+
+  const c0 = Math.floor(hb.x / TILE), c1 = Math.floor((hb.x + hb.w) / TILE);
+  const r0 = Math.floor(hb.y / TILE), r1 = Math.floor((hb.y + hb.h) / TILE);
+  for (let r = r0; r <= r1; r++) {
+    for (let c = c0; c <= c1; c++) {
+      const ch = worldMap[r]?.[c];
+      if (ch === undefined || legend[ch]?.solid) return true;
+    }
+  }
+
+  return buildings.some(b => b.appears() && rectanglesTouch(hb, bodyRect(b)));
+}
+
 /* --------------------------------------------------------------
    RANDOM EDGE SPAWN POSITION
 -------------------------------------------------------------- */
@@ -241,7 +393,7 @@ function getEdgeSpawnPosition(size){
 }
 
 /* --------------------------------------------------------------
-   ENEMY SPAWNING (normal enemies now use the **player** sprite set)
+   ENEMY SPAWNING
 -------------------------------------------------------------- */
 function spawnEnemy() {
   const pos = getEdgeSpawnPosition(NORMAL_ENEMY_SIZE);
@@ -251,11 +403,10 @@ function spawnEnemy() {
     w:NORMAL_ENEMY_SIZE, h:NORMAL_ENEMY_SIZE,
     s:NORMAL_ENEMY_SPEED,
     animTimer:0, animFrame:0, animFps:6,
-    animFrames:getAnimationFrameCount("monster")   // monster = old player graphics (4‑frame walk)
+    animFrames:getAnimationFrameCount("monster")
   });
 }
 
-/* Germs stay unchanged */
 function spawnGermEnemy() {
   const pos = getEdgeSpawnPosition(GERM_START_SIZE);
   enemies.push({
@@ -271,20 +422,23 @@ function spawnGermEnemy() {
 
 /* --------------------------------------------------------------
    ROOMS & DOORS
+   World doors are generated from the buildings above.
+   Interior doors keep their old positions; doorTile is the tile drawn.
 -------------------------------------------------------------- */
 const rooms = {
   world:{
     name:"World", bg:"#4caf50",
-    doors:[
-      {id:"buildingA", x:30,  y:540, w:80, h:80, target:"buildingA", emoji:"🏠"},
-      {id:"buildingB", x:380, y:800,  w:80, h:80, target:"buildingB", emoji:"🏢"}
-    ],
+    get doors(){
+      return buildings
+        .filter(b => b.appears())
+        .map(b => ({ ...doorRect(b), target:b.target, hidden:true }));
+    },
     spawnEnemy(){}
   },
 
   buildingA:{
     name:"Building A", bg:"#8b4513",
-    doors:[{x:200, y:660, w:80, h:80, target:"world", emoji:"🚪"}],
+    doors:[{x:200, y:660, w:80, h:80, target:"world", doorTile:85}],
     spawnEnemy(){},
     decor:[
       {x:150, y:300, emoji:"🪑"},
@@ -295,19 +449,19 @@ const rooms = {
 
   buildingB:{
     name:"Building B", bg:"#3b5998",
-    doors:[{x:200, y:20, w:80, h:80, target:"world", emoji:"🚪", lockedEmoji:"🔒", requiredKills:5, showLock:true}],
-    spawnEnemy(){ spawnEnemy(); }   // always uses the swapped sprite set
+    doors:[{x:200, y:20, w:80, h:80, target:"world", doorTile:85, requiredKills:5, showLock:true}],
+    spawnEnemy(){ spawnEnemy(); }
   },
 
   buildingC:{
     name:"Building C", bg:"#d1e8f0",
-    doors:[{x:200, y:660, w:80, h:80, target:"world", emoji:"🚪"}],
+    doors:[{x:200, y:660, w:80, h:80, target:"world", doorTile:89}],
     spawnEnemy(){}
   },
 
   buildingD:{
     name:"Building D", bg:"#403050",
-    doors:[{x:200, y:660, w:80, h:80, target:"world", emoji:"🚪"}],
+    doors:[{x:200, y:660, w:80, h:80, target:"world", doorTile:89}],
     spawnEnemy(){ spawnGermEnemy(); }
   }
 };
@@ -316,12 +470,7 @@ let currentRoom = rooms.world;
 /* --------------------------------------------------------------
    RESET & INITIAL SETUP
 -------------------------------------------------------------- */
-function resetWorldBuildings(){
-  rooms.world.doors = rooms.world.doors.filter(d=>d.id!=="buildingC" && d.id!=="buildingD");
-  buildingCAdded = false; buildingDAdded = false;
-}
 function reset(){
-  resetWorldBuildings();
   currentRoom = rooms.world;
 
   player = {
@@ -331,7 +480,6 @@ function reset(){
     flashTimer:0,
     dir:"down",
     animTimer:0, animFrame:0, animFps:8,
-    /* player now uses the MONSTER graphics (single frame) */
     animFrames:getAnimationFrameCount("player","down")
   };
 
@@ -364,7 +512,7 @@ function updateAnimation(entity, delta){
 }
 
 /* --------------------------------------------------------------
-   PLAYER UPDATE (direction handling)
+   PLAYER UPDATE (direction + collisions)
 -------------------------------------------------------------- */
 function updatePlayer(delta){
   let moving = false;
@@ -375,29 +523,25 @@ function updatePlayer(delta){
       const nx = joystick.dx / mag;
       const ny = joystick.dy / mag;
 
-      // four‑way direction
       if (Math.abs(nx) > Math.abs(ny)) player.dir = nx > 0 ? "right" : "left";
-      else                           player.dir = ny > 0 ? "down" : "up";
+      else                             player.dir = ny > 0 ? "down" : "up";
 
-      player.x += nx * player.speed;
-      player.y += ny * player.speed;
+      // move one axis at a time so the player slides along walls
+      const sx = nx * player.speed, sy = ny * player.speed;
+      player.x += sx; if (blockedAt()) player.x -= sx;
+      player.y += sy; if (blockedAt()) player.y -= sy;
     }
   }
 
-  if (moving){
-    // player now uses the MONSTER sprite (single frame) – no need to recalc frames,
-    // but the call is harmless
-    updateAnimation(player, delta);
-  }else{
-    player.animFrame = 0; player.animTimer = 0;
-  }
+  if (moving) updateAnimation(player, delta);
+  else { player.animFrame = 0; player.animTimer = 0; }
 
   player.x = Math.max(0, Math.min(canvas.width - player.w, player.x));
   player.y = Math.max(0, Math.min(canvas.height - player.h, player.y));
 }
 
 /* --------------------------------------------------------------
-   ENEMY UPDATE (direction for optional flipping)
+   ENEMY UPDATE
 -------------------------------------------------------------- */
 function updateEnemies(delta){
   enemies.forEach(e=>{
@@ -409,9 +553,8 @@ function updateEnemies(delta){
     e.x += (dx/dist) * e.s;
     e.y += (dy/dist) * e.s;
 
-    // direction for flip
     if (Math.abs(dx) > Math.abs(dy)) e.dir = dx > 0 ? "right" : "left";
-    else                           e.dir = dy > 0 ? "down" : "up";
+    else                             e.dir = dy > 0 ? "down" : "up";
 
     updateAnimation(e, delta);
   });
@@ -440,7 +583,7 @@ function drawKillEffects(){
 }
 
 /* --------------------------------------------------------------
-   ENEMY COLLISIONS (unchanged)
+   ENEMY COLLISIONS
 -------------------------------------------------------------- */
 function handleEnemyCollisions(){
   const remove = new Set();
@@ -451,7 +594,6 @@ function handleEnemyCollisions(){
       const a=enemies[i], b=enemies[j];
       if (!rectanglesTouch(a,b)) continue;
 
-      // normal enemies collide
       if (a.type==="normal" && b.type==="normal"){
         const ex=(a.x+b.x)/2 + a.w/2;
         const ey=(a.y+b.y)/2 + a.h/2;
@@ -461,7 +603,6 @@ function handleEnemyCollisions(){
         continue;
       }
 
-      // germs (absorption) – unchanged
       if (a.type==="germ" && b.type==="germ"){
         let absorber, absorbed, absorbedIdx;
         if (a.w >= b.w){ absorber=a; absorbed=b; absorbedIdx=j; }
@@ -543,20 +684,6 @@ function damagePlayer(delta){
 function collide(){ return enemies.some(e=>rectanglesTouch(player,e)); }
 
 /* --------------------------------------------------------------
-   BUILDING UNLOCK LOGIC
--------------------------------------------------------------- */
-function maybeAddBuildingC(){
-  if (buildingCAdded || kills < 10) return;
-  rooms.world.doors.push({id:"buildingC", x:200, y:780, w:80, h:80, target:"buildingC", emoji:"🏰"});
-  buildingCAdded = true;
-}
-function maybeAddBuildingD(){
-  if (buildingDAdded || !showHealthBar) return;
-  rooms.world.doors.push({id:"buildingD", x:350, y:750, w:80, h:80, target:"buildingD", emoji:"🏥"});
-  buildingDAdded = true;
-}
-
-/* --------------------------------------------------------------
    KING PLACEMENT & DIALOGUE
 -------------------------------------------------------------- */
 function maybePlaceKing(){
@@ -587,8 +714,7 @@ function advanceKingDialogue(){
     dlgBox.style.display = "none";
     gamePaused = false; king.active = false;
     dlgBtn.textContent = "Next";
-    showHealthBar = true; playerHealth = MAX_HEALTH; playerInvuln = 0;
-    maybeAddBuildingD();
+    showHealthBar = true; playerHealth = MAX_HEALTH; playerInvuln = 0;   // building D now appears
     lastTime = performance.now();
     return;
   }
@@ -629,23 +755,32 @@ function processGameOver(){
 function enterRoom(targetName){
   const target = rooms[targetName];
   if (!target) return;
+  const cameFrom = currentRoom;
   currentRoom = target;
   enemies = []; lastSpawn = 0;
   player.x = canvas.width/2 - player.w/2;
   player.y = canvas.height/2 - player.h/2;
-  joystick.active = false; joystick.dx = 0; joystick.dy = 0;
 
-  if (currentRoom===rooms.buildingC) maybePlaceKing();
-  if (currentRoom===rooms.world){
+  // coming back outside: stand just below the door of the building we left
+  if (target === rooms.world) {
+    const b = buildings.find(b => rooms[b.target] === cameFrom);
+    if (b) {
+      const d = doorRect(b);
+      player.x = d.x + d.w/2 - player.w/2;
+      player.y = d.y + d.h - 30;
+    }
     king.talked = false;
-    maybeAddBuildingC(); maybeAddBuildingD();
   }
+
+  joystick.active = false; joystick.dx = 0; joystick.dy = 0;
+  if (currentRoom===rooms.buildingC) maybePlaceKing();
 }
 function checkDoorCollision(){
+  const hb = hitbox();
   for (const d of currentRoom.doors){
     const unlocked = !d.requiredKills || kills >= d.requiredKills;
     if (!unlocked) continue;
-    if (rectanglesTouch(player,d)){
+    if (rectanglesTouch(hb,d)){
       enterRoom(d.target);
       return;
     }
@@ -656,25 +791,26 @@ function getCurrentSpawnInterval(){
 }
 
 /* --------------------------------------------------------------
-   DRAW BACKGROUND / GRID / DOORS / DECOR
+   DRAW BACKGROUND / DOORS / DECOR
 -------------------------------------------------------------- */
-function drawGrid(){
-  ctx.save(); ctx.strokeStyle="rgba(255,255,255,0.08)"; ctx.lineWidth=1;
-  for (let x=0;x<canvas.width;x+=40){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke(); }
-  for (let y=0;y<canvas.height;y+=40){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke(); }
-  ctx.restore();
+function drawBackground(){
+  if (currentRoom === rooms.world) drawWorldTiles();
+  else drawInteriorFloor();
 }
+
+/* Interior exit doors (the town's doors are part of the building tiles) */
 function drawDoors(){
+  if (currentRoom === rooms.world) return;
   currentRoom.doors.forEach(d=>{
     const unlocked = !d.requiredKills || kills >= d.requiredKills;
-    ctx.save(); ctx.textAlign="center"; ctx.textBaseline="middle";
-    if (unlocked){
-      ctx.font="48px Arial"; ctx.fillStyle="#fff";
-      ctx.fillText(d.emoji||"🚪", d.x+d.w/2, d.y+d.h/2);
-    }else{
-      ctx.globalAlpha=0.7; ctx.font="48px Arial";
-      ctx.fillText(d.lockedEmoji||"🔒", d.x+d.w/2, d.y+d.h/2);
-      ctx.globalAlpha=1;
+    ctx.save();
+    ctx.globalAlpha = unlocked ? 1 : 0.6;
+    drawTile(d.doorTile || 85, d.x, d.y, d.w, d.h);
+    ctx.globalAlpha = 1;
+    if (!unlocked){
+      ctx.textAlign="center"; ctx.textBaseline="middle";
+      ctx.font="40px Arial"; ctx.fillStyle="#fff";
+      ctx.fillText("🔒", d.x+d.w/2, d.y+d.h/2);
       if (d.showLock){
         ctx.font="20px Arial"; ctx.fillStyle="#ffcc00";
         ctx.fillText(String(d.requiredKills), d.x+d.w/2, d.y+d.h+14);
@@ -700,7 +836,6 @@ function drawPlayer(){
     ctx.globalAlpha = flashing ? 0.35 : 1;
   }
 
-  /* ---- PLAYER now uses the MONSTER sprite set ---- */
   if (player.dir === "left"){
     ctx.translate(player.x+player.w, player.y);
     ctx.scale(-1,1);
@@ -716,7 +851,7 @@ function drawKing(){
 }
 function drawEnemies(){
   enemies.forEach(e=>{
-    const spriteName = e.type==="germ" ? "virus" : "monster";   // normal enemies use the MONSTER sprite set (now player graphics)
+    const spriteName = e.type==="germ" ? "virus" : "monster";
     if (e.dir === "left"){
       ctx.save();
       ctx.translate(e.x+e.w, e.y);
@@ -727,7 +862,6 @@ function drawEnemies(){
       drawSprite(spriteName,e.dir,e.animFrame,e.x,e.y,e.w,e.h);
     }
 
-    // health bar for germs (unchanged)
     if (e.type==="germ"){
       const barW = Math.max(24, Math.min(e.w,70));
       const maxH = Math.max(e.initialHealth, e.health);
@@ -761,24 +895,49 @@ function drawJoystick(){
 function drawRoomName(){
   ctx.save(); ctx.font="18px Arial"; ctx.textAlign="left"; ctx.textBaseline="top";
   ctx.fillStyle="rgba(255,255,255,0.9)";
+  ctx.strokeStyle="rgba(0,0,0,0.6)"; ctx.lineWidth=3;
+  ctx.strokeText(currentRoom.name, 12, 42);
   ctx.fillText(currentRoom.name, 12, 42);
   ctx.restore();
 }
 
+/* Press "B" to show collision boxes (red = building body, blue = door, yellow = feet) */
+function drawDebugBoxes(){
+  if (!debugBoxes || currentRoom !== rooms.world) return;
+  ctx.save(); ctx.lineWidth = 2;
+  buildings.filter(b => b.appears()).forEach(b => {
+    let r = bodyRect(b); ctx.strokeStyle = "red";  ctx.strokeRect(r.x, r.y, r.w, r.h);
+    r = doorRect(b);     ctx.strokeStyle = "blue"; ctx.strokeRect(r.x, r.y, r.w, r.h);
+  });
+  const hb = hitbox(); ctx.strokeStyle = "yellow"; ctx.strokeRect(hb.x, hb.y, hb.w, hb.h);
+  ctx.restore();
+}
+
 /* --------------------------------------------------------------
-   FULL DRAW CALL
+   FULL DRAW CALL (buildings are depth-sorted against the player)
 -------------------------------------------------------------- */
 function draw(){
   ctx.imageSmoothingEnabled = false;
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  ctx.fillStyle = currentRoom.bg;
-  ctx.fillRect(0,0,canvas.width,canvas.height);
-  drawGrid();
+  drawBackground();
+
+  const inWorld = currentRoom === rooms.world;
+  const feet = player.y + player.h;
+  const visible = inWorld ? buildings.filter(b => b.appears()) : [];
+
+  // buildings whose base is above the player's feet are drawn behind the player
+  visible.filter(b => b.y + b.h <= feet).forEach(drawBuilding);
+
   drawDoors();
   drawDecor();
   drawKing();
   drawEnemies();
   drawPlayer();
+
+  // buildings below the player's feet are drawn in front (roof covers the player)
+  visible.filter(b => b.y + b.h > feet).forEach(drawBuilding);
+
+  drawDebugBoxes();
   drawJoystick();
   drawKillEffects();
   drawRoomName();
@@ -801,7 +960,6 @@ function loop(timestamp){
   const scoreEl = document.getElementById("score");
   if (scoreEl) scoreEl.textContent = String(kills);
 
-  maybeAddBuildingC(); maybeAddBuildingD();
   if (timestamp - lastSpawn > getCurrentSpawnInterval()){
     currentRoom.spawnEnemy();
     lastSpawn = timestamp;
@@ -909,10 +1067,12 @@ window.addEventListener("resize", resize);
 resize();
 
 /* --------------------------------------------------------------
-   DIALOGUE KEY CONTROL (E/e)
+   KEYS: E = advance dialogue, B = toggle collision-box debug view
 -------------------------------------------------------------- */
 window.addEventListener("keydown", e=>{
-  if (e.key.toLowerCase() !== "e") return;
+  const k = e.key.toLowerCase();
+  if (k === "b"){ debugBoxes = !debugBoxes; return; }
+  if (k !== "e") return;
   const dlg = document.getElementById("dialogueBox");
   if (dlg && dlg.style.display !== "none") advanceKingDialogue();
 });
@@ -923,6 +1083,7 @@ window.addEventListener("keydown", e=>{
 window.addEventListener("load", async ()=>{
   try{
     await loadSpriteSheet();
+    await loadTownSheet();
 
     const stored = localStorage.getItem("survivalPlayerName");
     if (stored){ playerName = stored; const pn = document.getElementById("playerName"); if (pn) pn.textContent = playerName; }
@@ -942,7 +1103,7 @@ window.addEventListener("load", async ()=>{
     console.error("Game init failed:", err);
     const final = document.getElementById("final");
     const overlay = document.getElementById("overlay");
-    if (final) final.textContent = "The sprites could not be loaded. Open the browser console for details.";
+    if (final) final.textContent = "Some images could not be loaded. Open the browser console for details.";
     if (overlay) overlay.style.display = "flex";
   }
 });
