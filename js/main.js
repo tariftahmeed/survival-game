@@ -137,8 +137,8 @@ const townSheet = new Image();
 function loadTownSheet() {
   return new Promise((resolve, reject) => {
     townSheet.onload  = resolve;
-    townSheet.onerror = () => reject(new Error("Could not load assets/tiles/town.png"));
-    townSheet.src = "assets/tiles/town.png";
+    townSheet.onerror = () => reject(new Error("Could not load assets/tiles/tilemap_packed.png"));
+    townSheet.src = "assets/tiles/tilemap_packed.png";
   });
 }
 
