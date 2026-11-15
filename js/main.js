@@ -247,7 +247,7 @@ const buildings = [
   // B – red house with a window (monster arena)
   makeBuilding("buildingB", 8, 14, [...RED_ROOF,  [84,85,75]]),
   // C – grey castle house (the king), appears after 10 kills
-  makeBuilding("buildingC", 1, 20, [...GREY_ROOF, [88,89,79]], () => kills >= 5),
+  makeBuilding("buildingC", 1, 20, [...GREY_ROOF, [88,89,79]], () => kills >= 10),
   // D – grey house (germs), appears after the king gives you the health bar
   makeBuilding("buildingD", 8, 6,  [...GREY_ROOF, [76,89,79]], () => showHealthBar)
 ];
@@ -1058,12 +1058,22 @@ window.addEventListener("focus", ()=>{
    RESPONSIVE CANVAS SIZING
 -------------------------------------------------------------- */
 function resize(){
-  const maxW = Math.min(window.innerWidth, 540);
-  canvas.style.width  = `${maxW}px`;
-  canvas.style.height = `${maxW * 1170 / 540}px`;
+  // fit the whole 540x1170 game into the visible screen (width AND height)
+  const vw = window.visualViewport?.width  ?? window.innerWidth;
+  const vh = window.visualViewport?.height ?? window.innerHeight;
+  const docTop = canvas.getBoundingClientRect().top + window.scrollY;  // space used above the canvas
+  const availH = Math.max(200, vh - docTop);
+  const scale = Math.min(vw / 540, availH / 1170, 1);
+
+  canvas.style.width  = `${Math.floor(540  * scale)}px`;
+  canvas.style.height = `${Math.floor(1170 * scale)}px`;
+  canvas.style.display = "block";
+  canvas.style.margin  = "0 auto";
   ctx.imageSmoothingEnabled = false;
 }
 window.addEventListener("resize", resize);
+window.addEventListener("orientationchange", resize);
+if (window.visualViewport) window.visualViewport.addEventListener("resize", resize);
 resize();
 
 /* --------------------------------------------------------------
