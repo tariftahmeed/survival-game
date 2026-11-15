@@ -60,8 +60,8 @@ header {
 
 #leaderboard {
   position: fixed;
-  top: 30px;
-  left: 15px;
+  top: 60px;
+  right: 450px;
 
   background: #181818;
   color: #fff;
