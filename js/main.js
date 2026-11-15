@@ -247,7 +247,7 @@ const buildings = [
   // B – red house with a window (monster arena)
   makeBuilding("buildingB", 8, 14, [...RED_ROOF,  [84,85,75]]),
   // C – grey castle house (the king), appears after 10 kills
-  makeBuilding("buildingC", 1, 20, [...GREY_ROOF, [88,89,79]], () => kills >= 10),
+  makeBuilding("buildingC", 1, 20, [...GREY_ROOF, [88,89,79]], () => kills >= 5),
   // D – grey house (germs), appears after the king gives you the health bar
   makeBuilding("buildingD", 8, 6,  [...GREY_ROOF, [76,89,79]], () => showHealthBar)
 ];
