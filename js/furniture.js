@@ -1,161 +1,451 @@
 /* ==============================================================
    FURNITURE.JS – interior decoration for Hungry Reds
-   Uses assets/tiles/interior_tileset.png (16 x 16 tiles of 32px)
+   Uses assets/tiles/interior_tileset.png
+
+   NEW TILESET VERSION
+   -------------------
+   The new furniture sheet is 512 x 512, but furniture is NOT
+   arranged as uniform 32 x 32 cells.
+
+   Each sprite therefore has an explicit source rectangle:
+   { x, y, w, h }
+
+   Room placement still uses the same 45px world grid as main.js.
    ============================================================== */
 
-const TILE   = 45;   // on-screen tile size (same as main.js)
-const IN_SRC = 32;   // tile size inside interior_tileset.png
-const IN_COLS = 16;  // tiles per row in the sheet
+const TILE = 45;
+
+
+/* ==============================================================
+   LOAD INTERIOR TILESET
+   ============================================================== */
 
 const interiorSheet = new Image();
+
 export function loadInteriorSheet() {
   return new Promise((resolve, reject) => {
-    interiorSheet.onload  = resolve;
-    interiorSheet.onerror = () => reject(new Error("Could not load assets/tiles/interior_tileset.png"));
-    interiorSheet.src = "assets/tiles/interior_tileset.png";
+    interiorSheet.onload = resolve;
+
+    interiorSheet.onerror = () => {
+      reject(
+        new Error(
+          "Could not load assets/tiles/interior_tileset.png"
+        )
+      );
+    };
+
+    interiorSheet.src =
+      "assets/tiles/interior_tileset.png";
   });
 }
 
-/* F(tileId, widthInTiles, heightInTiles, col, row, flags)
-   col/row are in 45px screen tiles (decimals allowed).
-   flags: "s" = solid (blocks the player), "f" = floor layer (rugs, drawn under everything),
-          "o" = overhead layer (chandeliers, drawn over the player) */
-function F(id, w, h, c, r, flags = "") {
-  return {
-    id, w, h, x: c * TILE, y: r * TILE,
-    solid: flags.includes("s"),
-    floor: flags.includes("f"),
-    over:  flags.includes("o")
-  };
-}
 
-export const FURNITURE = {
-  /* A – cosy home: bedroom (top), living room, dining + kitchen (bottom) */
-  buildingA: [
-  F(28,1,2,1,1,"s"), // wardrobe wood
-  F(16,1,2,2,1), // floor lamp cream
-  F(23,1,2,4,1), // window day
-  F(117,1,1,5,1), // frame night
-  F(23,1,2,6,1), // window day
-  F(104,1,1,7,2,"s"), // nightstand wood
-  F(48,2,2,8,1,"s"), // double bed green
-  F(104,1,1,10,2,"s"), // nightstand wood
-  F(160,1,2,1,3,"s"), // bookshelf A
-  F(161,1,2,1,5,"s"), // bookshelf B
-  F(13,1,1,2,3,"s"), // plant
-  F(60,2,2,9,4,"s"), // fireplace
-  F(142,2,2,3,7,"f"), // round rug
-  F(56,2,2,3,5,"s"), // sofa red
-  F(103,1,1,3.5,7.5,"s"), // round table
-  F(101,1,1,7,6,"s"), // armchair red
-  F(14,1,1,10,7,"s"), // plant big
-  F(96,1,1,4,19,"s"), // chair front
-  F(96,1,1,5,19,"s"), // chair front
-  F(82,2,1,4,20,"s"), // clothed table
-  F(99,1,1,4,21,"s"), // chair back
-  F(99,1,1,5,21,"s"), // chair back
-  F(10,1,1,1,19,"s"), // crate
-  F(11,1,1,10,19,"s"), // barrel
-  F(13,1,1,1,18,"s"), // plant
-  F(88,2,1,1,23,"s"), // kitchen counter
-  F(90,2,1,3,23,"s"), // counter+sink
-  F(92,2,1,5,23,"s"), // stove
-  F(30,1,2,7,22,"s"), // fridge
-  F(163,1,2,8,22,"s"), // glass cupboard
-  F(62,2,2,9,22,"s"), // bathtub
-  ],
+/* ==============================================================
+   SPRITE ATLAS
 
-  /* B – study / lounge / guest bed (only shown after the health bar + enemies stop) */
-  buildingB: [
-  F(160,1,2,1,1,"s"), // bookshelf A
-  F(161,1,2,2,1,"s"), // bookshelf B
-  F(163,1,2,3,1,"s"), // glass cupboard
-  F(172,1,2,7,1,"s"), // glass cupboard 2
-  F(169,1,2,8,1,"s"), // bookshelf C
-  F(166,1,2,9,1,"s"), // bottles shelf
-  F(170,1,2,10,1,"s"), // plates shelf 2
-  F(0,1,1,8,3), // lamp cream
-  F(84,2,1,8,4,"s"), // desk
-  F(99,1,1,8,5,"s"), // chair back
-  F(16,1,2,1,3,"s"), // floor lamp cream
-  F(58,2,2,1,5,"s"), // sofa green
-  F(142,2,2,3,6,"f"), // round rug
-  F(103,1,1,3.5,6.5,"s"), // round table
-  F(17,1,2,7,3,"s"), // floor lamp red
-  F(60,2,2,9,7,"s"), // fireplace
-  F(14,1,1,10,5,"s"), // plant big
-  F(132,2,1,2,18,"o"), // chandelier gold A
-  F(96,1,1,2,19,"s"), // chair front
-  F(96,1,1,3,19,"s"), // chair front
-  F(82,2,1,2,20,"s"), // clothed table
-  F(99,1,1,2,21,"s"), // chair back
-  F(99,1,1,3,21,"s"), // chair back
-  F(11,1,1,1,23,"s"), // barrel
-  F(10,1,1,2,23,"s"), // crate
-  F(9,1,1,3,23,"s"), // basket
-  F(19,1,2,5,22,"s"), // coat rack
-  F(25,1,2,7,22,"s"), // standing mirror
-  F(29,1,2,8,22,"s"), // wardrobe dark
-  F(109,1,1,9,22,"s"), // small dresser
-  F(52,1,2,9,19,"s"), // single bed blue
-  F(104,1,1,10,20,"s"), // nightstand wood
-  ],
+   x = source X position inside PNG
+   y = source Y position inside PNG
+   w = source width
+   h = source height
 
-  /* C – throne hall: red carpet, throne, benches, clocks, chandeliers */
-  buildingC: [
-  F(24,1,2,3,1), // window night
-  F(24,1,2,8,1), // window night
-  F(128,1,2,2,1), // curtain red
-  F(128,1,2,4,1), // curtain red
-  F(128,1,2,7,1), // curtain red
-  F(128,1,2,9,1), // curtain red
-  F(60,2,2,5,1,"s"), // fireplace
-  F(160,1,2,1,1,"s"), // bookshelf A
-  F(163,1,2,10,1,"s"), // glass cupboard
-  F(152,2,1,5,8,"f"), // rug yellow
-  F(136,2,1,5,9,"f"), // rug red
-  F(136,2,1,5,10,"f"), // rug red
-  F(136,2,1,5,11,"f"), // rug red
-  F(136,2,1,5,12,"f"), // rug red
-  F(136,2,1,5,13,"f"), // rug red
-  F(136,2,1,5,14,"f"), // rug red
-  F(136,2,1,5,15,"f"), // rug red
-  F(136,2,1,5,16,"f"), // rug red
-  F(101,1,1,5.5,5.55,"s"), // armchair red
-  F(17,1,2,4.2,5), // floor lamp red
-  F(17,1,2,6.8,5), // floor lamp red
-  F(94,2,1,1,10,"s"), // bench
-  F(94,2,1,9,10,"s"), // bench
-  F(14,1,1,2,9,"s"), // plant big
-  F(14,1,1,9,9,"s"), // plant big
-  F(94,2,1,1,14,"s"), // bench
-  F(94,2,1,9,14,"s"), // bench
-  F(14,1,1,2,13,"s"), // plant big
-  F(14,1,1,9,13,"s"), // plant big
-  F(18,1,2,1,17,"s"), // grandfather clock
-  F(18,1,2,10,17,"s"), // grandfather clock
-  F(161,1,2,1,19,"s"), // bookshelf B
-  F(172,1,2,10,19,"s"), // glass cupboard 2
-  F(108,1,1,2,22,"s"), // chest
-  F(108,1,1,9,22,"s"), // chest
-  F(132,2,1,5,11,"o"), // chandelier gold A
-  F(134,2,1,5,19,"o"), // chandelier gold B
-  ]
-};
+   These are SOURCE PIXELS, not world tiles.
+   ============================================================== */
 
-/* Draw one piece of furniture */
-export function drawFurn(ctx, f) {
-  ctx.drawImage(
-    interiorSheet,
-    (f.id % IN_COLS) * IN_SRC, Math.floor(f.id / IN_COLS) * IN_SRC, f.w * IN_SRC, f.h * IN_SRC,
-    Math.round(f.x), Math.round(f.y), Math.round(f.w * TILE), Math.round(f.h * TILE)
-  );
-}
+const SPRITES = Object.freeze({
 
-/* Collision rectangle: the lower 60% of the sprite (so you can walk "behind" the top) */
-export function furnSolids(list) {
-  return list.filter(f => f.solid).map(f => {
-    const w = f.w * TILE, h = f.h * TILE;
-    return { x: f.x + 4, y: f.y + h * 0.4, w: w - 8, h: h * 0.6 };
-  });
-}
+  /* ----------------------------------------------------------
+     SMALL DECORATIONS – TOP ROW
+     ---------------------------------------------------------- */
+
+  lampTableCream: {
+    x: 4,
+    y: 3,
+    w: 29,
+    h: 38
+  },
+
+  lampTableGreen: {
+    x: 34,
+    y: 3,
+    w: 29,
+    h: 38
+  },
+
+  candle: {
+    x: 72,
+    y: 3,
+    w: 20,
+    h: 39
+  },
+
+  chandelier: {
+    x: 98,
+    y: 2,
+    w: 26,
+    h: 41
+  },
+
+  flowers: {
+    x: 128,
+    y: 2,
+    w: 29,
+    h: 41
+  },
+
+  basket: {
+    x: 253,
+    y: 4,
+    w: 43,
+    h: 37
+  },
+
+  crate: {
+    x: 299,
+    y: 4,
+    w: 43,
+    h: 37
+  },
+
+  barrel: {
+    x: 344,
+    y: 2,
+    w: 38,
+    h: 42
+  },
+
+  plantSmall: {
+    x: 386,
+    y: 2,
+    w: 34,
+    h: 41
+  },
+
+  plantBig: {
+    x: 422,
+    y: 1,
+    w: 44,
+    h: 44
+  },
+
+
+  /* ----------------------------------------------------------
+     TALL OBJECTS
+     ---------------------------------------------------------- */
+
+  floorLampCream: {
+    x: 2,
+    y: 45,
+    w: 31,
+    h: 54
+  },
+
+  floorLampRed: {
+    x: 35,
+    y: 45,
+    w: 29,
+    h: 54
+  },
+
+  grandfatherClock: {
+    x: 66,
+    y: 45,
+    w: 31,
+    h: 54
+  },
+
+  coatRack: {
+    x: 99,
+    y: 44,
+    w: 24,
+    h: 56
+  },
+
+  doorWood: {
+    x: 126,
+    y: 45,
+    w: 41,
+    h: 55
+  },
+
+  doorDark: {
+    x: 170,
+    y: 45,
+    w: 40,
+    h: 55
+  },
+
+  windowDay: {
+    x: 213,
+    y: 45,
+    w: 41,
+    h: 55
+  },
+
+  windowNight: {
+    x: 257,
+    y: 45,
+    w: 41,
+    h: 55
+  },
+
+  standingMirror: {
+    x: 301,
+    y: 45,
+    w: 41,
+    h: 55
+  },
+
+  stairs: {
+    x: 345,
+    y: 45,
+    w: 48,
+    h: 55
+  },
+
+  ladder: {
+    x: 395,
+    y: 45,
+    w: 29,
+    h: 55
+  },
+
+  wardrobeWood: {
+    x: 427,
+    y: 45,
+    w: 39,
+    h: 55
+  },
+
+  wardrobeDark: {
+    x: 468,
+    y: 45,
+    w: 40,
+    h: 55
+  },
+
+  fridge: {
+    x: 469,
+    y: 46,
+    w: 39,
+    h: 54
+  },
+
+
+  /* ----------------------------------------------------------
+     BEDS / SOFAS / FIREPLACE / TV
+     ---------------------------------------------------------- */
+
+  bedGreen: {
+    x: 2,
+    y: 104,
+    w: 82,
+    h: 54
+  },
+
+  bedRed: {
+    x: 86,
+    y: 104,
+    w: 82,
+    h: 54
+  },
+
+  bedBlue: {
+    x: 170,
+    y: 104,
+    w: 40,
+    h: 54
+  },
+
+  bedCream: {
+    x: 214,
+    y: 104,
+    w: 40,
+    h: 54
+  },
+
+  sofaRed: {
+    x: 257,
+    y: 104,
+    w: 71,
+    h: 54
+  },
+
+  sofaGreen: {
+    x: 330,
+    y: 104,
+    w: 71,
+    h: 54
+  },
+
+  fireplace: {
+    x: 403,
+    y: 101,
+    w: 61,
+    h: 66
+  },
+
+  television: {
+    x: 466,
+    y: 104,
+    w: 46,
+    h: 54
+  },
+
+
+  /* ----------------------------------------------------------
+     TABLES / COUNTERS
+     ---------------------------------------------------------- */
+
+  benchWood: {
+    x: 2,
+    y: 171,
+    w: 82,
+    h: 27
+  },
+
+  benchRed: {
+    x: 86,
+    y: 171,
+    w: 82,
+    h: 27
+  },
+
+  desk: {
+    x: 170,
+    y: 171,
+    w: 81,
+    h: 37
+  },
+
+  dresser: {
+    x: 253,
+    y: 171,
+    w: 42,
+    h: 37
+  },
+
+  nightstandWood: {
+    x: 297,
+    y: 171,
+    w: 42,
+    h: 37
+  },
+
+  kitchenCounter: {
+    x: 340,
+    y: 171,
+    w: 81,
+    h: 37
+  },
+
+  counterSink: {
+    x: 423,
+    y: 171,
+    w: 82,
+    h: 37
+  },
+
+  stove: {
+    x: 423,
+    y: 171,
+    w: 82,
+    h: 37
+  },
+
+
+  /* ----------------------------------------------------------
+     CHAIRS / SMALL FURNITURE
+     ---------------------------------------------------------- */
+
+  chairFront: {
+    x: 3,
+    y: 210,
+    w: 29,
+    h: 34
+  },
+
+  chairBack: {
+    x: 36,
+    y: 210,
+    w: 29,
+    h: 34
+  },
+
+  chairSide: {
+    x: 69,
+    y: 210,
+    w: 29,
+    h: 34
+  },
+
+  armchairRed: {
+    x: 154,
+    y: 210,
+    w: 39,
+    h: 34
+  },
+
+  roundTable: {
+    x: 213,
+    y: 210,
+    w: 39,
+    h: 34
+  },
+
+  smallDresser: {
+    x: 254,
+    y: 210,
+    w: 39,
+    h: 34
+  },
+
+  chest: {
+    x: 394,
+    y: 210,
+    w: 42,
+    h: 34
+  },
+
+  bathtub: {
+    x: 451,
+    y: 210,
+    w: 41,
+    h: 34
+  },
+
+
+  /* ----------------------------------------------------------
+     WALL DECORATIONS
+     ---------------------------------------------------------- */
+
+  frameLandscape: {
+    x: 2,
+    y: 247,
+    w: 81,
+    h: 29
+  },
+
+  frameHouse: {
+    x: 85,
+    y: 247,
+    w: 81,
+    h: 29
+  },
+
+  frameNight: {
+    x: 168,
+    y: 247,
+    w: 39,
+    h: 29
+  },
+
+  clockRound: {
+    x: 258,
+    y: 247,
+    w: 39,
+    h: 29
+  },
+
+  bottlesShelf: {
+    x: 299,
+    y: 247,
