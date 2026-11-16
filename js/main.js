@@ -1140,9 +1140,17 @@ window.addEventListener("keydown", e=>{
 -------------------------------------------------------------- */
 window.addEventListener("load", async ()=>{
   try{
+    console.log("1. Loading characters...");
     await loadSpriteSheet();
+    console.log("✓ Characters loaded");
+
+    console.log("2. Loading town...");
     await loadTownSheet();
+    console.log("✓ Town loaded");
+
+    console.log("3. Loading furniture...");
     await loadInteriorSheet();
+    console.log("✓ Furniture loaded");
 
     const stored = localStorage.getItem("survivalPlayerName");
     if (stored){ playerName = stored; const pn = document.getElementById("playerName"); if (pn) pn.textContent = playerName; }
