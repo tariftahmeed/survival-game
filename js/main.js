@@ -450,7 +450,9 @@ const rooms = {
   buildingB:{
     name:"Building B", bg:"#3b5998",
     doors:[{x:200, y:20, w:80, h:80, target:"world", doorTile:85, requiredKills:5, showLock:true}],
-    spawnEnemy(){ spawnEnemy(); }
+    spawnEnemy(){ 
+       if(kills <= 5){
+       spawnEnemy();} return }
   },
 
   buildingC:{
