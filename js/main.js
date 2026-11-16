@@ -21,6 +21,7 @@ import {
   "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
 
 import { firebaseConfig } from "./firebase-config.js";
+import { loadInteriorSheet, FURNITURE, drawFurn, furnSolids } from "./furniture.js";
 
 /* --------------------------------------------------------------
    FIREBASE SETUP
@@ -246,7 +247,7 @@ const buildings = [
   makeBuilding("buildingA", 1, 6,  [...RED_ROOF,  [72,85,75]]),
   // B – red house with a window (monster arena)
   makeBuilding("buildingB", 8, 14, [...RED_ROOF,  [84,85,75]]),
-  // C – grey castle house (the king), appears after 10 kills
+  // C – grey castle house (the king), appears after 5 kills
   makeBuilding("buildingC", 1, 20, [...GREY_ROOF, [88,89,79]], () => kills >= 5),
   // D – grey house (germs), appears after the king gives you the health bar
   makeBuilding("buildingD", 8, 6,  [...GREY_ROOF, [76,89,79]], () => showHealthBar)
@@ -362,9 +363,19 @@ function hitbox() {
   return { x: player.x + 14, y: player.y + 36, w: player.w - 28, h: player.h - 40 };
 }
 
-/* True if the player's feet box is inside a solid tile or a building body (world only) */
+/* Furniture that is currently visible in the room the player is in */
+function activeFurniture() {
+  const f = currentRoom.furniture;
+  return (f && currentRoom.showFurniture !== false) ? f : [];
+}
+
+/* True if the player's feet box is inside a solid tile, a building body (world),
+   or a solid piece of furniture (interiors) */
 function blockedAt() {
-  if (currentRoom !== rooms.world) return false;
+  if (currentRoom !== rooms.world) {
+    const fb = hitbox();
+    return furnSolids(activeFurniture()).some(r => rectanglesTouch(fb, r));
+  }
   const hb = hitbox();
 
   const c0 = Math.floor(hb.x / TILE), c1 = Math.floor((hb.x + hb.w) / TILE);
@@ -424,6 +435,10 @@ function spawnGermEnemy() {
    ROOMS & DOORS
    World doors are generated from the buildings above.
    Interior doors keep their old positions; doorTile is the tile drawn.
+
+   furniture      = list from furniture.js (drawn from interior_tileset.png)
+   showFurniture  = set to false to hide it; furnishedWhen() is re-checked
+                    every time the player enters the room
 -------------------------------------------------------------- */
 const rooms = {
   world:{
@@ -440,24 +455,26 @@ const rooms = {
     name:"Building A", bg:"#8b4513",
     doors:[{x:200, y:660, w:80, h:80, target:"world", doorTile:85}],
     spawnEnemy(){},
-    decor:[
-      {x:150, y:300, emoji:"🪑"},
-      {x:230, y:300, emoji:"🪑"},
-      {x:190, y:460, emoji:"🛏️"}
-    ]
+    furniture: FURNITURE.buildingA
   },
 
   buildingB:{
     name:"Building B", bg:"#3b5998",
     doors:[{x:200, y:20, w:80, h:80, target:"world", doorTile:85, requiredKills:5, showLock:true}],
-    spawnEnemy(){ 
-       if(kills <= 5){
-       spawnEnemy();} return }
+    // furniture only appears once the health bar is unlocked AND enemies have
+    // stopped spawning (kills > 5), checked each time you walk in
+    furniture: FURNITURE.buildingB,
+    showFurniture: false,
+    furnishedWhen: () => showHealthBar && kills > 5,
+    spawnEnemy(){
+      if (kills <= 5) spawnEnemy();
+    }
   },
 
   buildingC:{
     name:"Building C", bg:"#d1e8f0",
     doors:[{x:200, y:660, w:80, h:80, target:"world", doorTile:89}],
+    furniture: FURNITURE.buildingC,
     spawnEnemy(){}
   },
 
@@ -474,6 +491,7 @@ let currentRoom = rooms.world;
 -------------------------------------------------------------- */
 function reset(){
   currentRoom = rooms.world;
+  rooms.buildingB.showFurniture = false;
 
   player = {
     x:220, y:330,
@@ -759,6 +777,10 @@ function enterRoom(targetName){
   if (!target) return;
   const cameFrom = currentRoom;
   currentRoom = target;
+
+  // rooms like Building B only get furnished if their condition is met right now
+  if (target.furnishedWhen) target.showFurniture = target.furnishedWhen();
+
   enemies = []; lastSpawn = 0;
   player.x = canvas.width/2 - player.w/2;
   player.y = canvas.height/2 - player.h/2;
@@ -821,6 +843,8 @@ function drawDoors(){
     ctx.restore();
   });
 }
+
+/* Optional emoji decor (rooms without a furniture list can still use `decor`) */
 function drawDecor(){
   if (!currentRoom.decor) return;
   ctx.save(); ctx.font="36px Arial"; ctx.textAlign="center"; ctx.textBaseline="middle";
@@ -903,38 +927,60 @@ function drawRoomName(){
   ctx.restore();
 }
 
-/* Press "B" to show collision boxes (red = building body, blue = door, yellow = feet) */
+/* Press "B" to show collision boxes
+   world: red = building body, blue = door, yellow = feet
+   interiors: green = solid furniture, yellow = feet */
 function drawDebugBoxes(){
-  if (!debugBoxes || currentRoom !== rooms.world) return;
+  if (!debugBoxes) return;
   ctx.save(); ctx.lineWidth = 2;
-  buildings.filter(b => b.appears()).forEach(b => {
-    let r = bodyRect(b); ctx.strokeStyle = "red";  ctx.strokeRect(r.x, r.y, r.w, r.h);
-    r = doorRect(b);     ctx.strokeStyle = "blue"; ctx.strokeRect(r.x, r.y, r.w, r.h);
-  });
+  if (currentRoom === rooms.world){
+    buildings.filter(b => b.appears()).forEach(b => {
+      let r = bodyRect(b); ctx.strokeStyle = "red";  ctx.strokeRect(r.x, r.y, r.w, r.h);
+      r = doorRect(b);     ctx.strokeStyle = "blue"; ctx.strokeRect(r.x, r.y, r.w, r.h);
+    });
+  } else {
+    ctx.strokeStyle = "lime";
+    furnSolids(activeFurniture()).forEach(r => ctx.strokeRect(r.x, r.y, r.w, r.h));
+    ctx.strokeStyle = "blue";
+    currentRoom.doors.forEach(d => ctx.strokeRect(d.x, d.y, d.w, d.h));
+  }
   const hb = hitbox(); ctx.strokeStyle = "yellow"; ctx.strokeRect(hb.x, hb.y, hb.w, hb.h);
   ctx.restore();
 }
 
 /* --------------------------------------------------------------
-   FULL DRAW CALL (buildings are depth-sorted against the player)
+   FULL DRAW CALL
+   - buildings are depth-sorted against the player (world)
+   - furniture is depth-sorted against the player (interiors)
+   - rugs ("floor") are drawn under everything, chandeliers ("over") on top
 -------------------------------------------------------------- */
 function draw(){
   ctx.imageSmoothingEnabled = false;
   ctx.clearRect(0,0,canvas.width,canvas.height);
   drawBackground();
 
+  const furn = activeFurniture();
+  furn.filter(f => f.floor).forEach(f => drawFurn(ctx, f));          // rugs
+
   const inWorld = currentRoom === rooms.world;
   const feet = player.y + player.h;
   const visible = inWorld ? buildings.filter(b => b.appears()) : [];
+  const base = f => f.y + f.h * TILE;
+  const furnLayer = furn
+    .filter(f => !f.floor && !f.over)
+    .sort((a, b) => base(a) - base(b));
 
   // buildings whose base is above the player's feet are drawn behind the player
   visible.filter(b => b.y + b.h <= feet).forEach(drawBuilding);
 
   drawDoors();
   drawDecor();
+  furnLayer.filter(f => base(f) <= feet).forEach(f => drawFurn(ctx, f));   // behind player
   drawKing();
   drawEnemies();
   drawPlayer();
+  furnLayer.filter(f => base(f) >  feet).forEach(f => drawFurn(ctx, f));   // in front of player
+  furn.filter(f => f.over).forEach(f => drawFurn(ctx, f));                 // chandeliers
 
   // buildings below the player's feet are drawn in front (roof covers the player)
   visible.filter(b => b.y + b.h > feet).forEach(drawBuilding);
@@ -1096,6 +1142,7 @@ window.addEventListener("load", async ()=>{
   try{
     await loadSpriteSheet();
     await loadTownSheet();
+    await loadInteriorSheet();
 
     const stored = localStorage.getItem("survivalPlayerName");
     if (stored){ playerName = stored; const pn = document.getElementById("playerName"); if (pn) pn.textContent = playerName; }
