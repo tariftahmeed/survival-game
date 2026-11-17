@@ -407,9 +407,9 @@ const rooms = {
     // stopped spawning (kills > 5), checked each time you walk in
     furniture: FURNITURE.buildingB,
     showFurniture: false,
-    furnishedWhen: () => showHealthBar && kills >= 5,
+    furnishedWhen: () => showHealthBar && kills > 5,
     spawnEnemy(){
-      if (kills < 5) spawnEnemy();
+      if (kills <= 5) spawnEnemy();
     }
   },
 
@@ -423,7 +423,7 @@ const rooms = {
   buildingD:{
     name:"Building D", bg:"#403050",
     doors:[{x:200, y:1100, w:80, h:80, target:"world", doorTile:89, requiredKills: 500, showLock:true}],
-    spawnEnemy(){ if (kills < 500) spawnGermEnemy(); }
+    spawnEnemy(){ if (kills <= 500) spawnGermEnemy(); }
   }
 };
 let currentRoom = rooms.world;
