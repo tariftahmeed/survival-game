@@ -551,14 +551,14 @@ function setupNpcs() {
   addNpc("villagerWoman", "buildingA", 380, 260, { dir: "down" });
 
   // ii) World – slow wanderers
-  addNpc("elder",    "world", 100, 520, { wander: true });
-  addNpc("kid",      "world", 400, 620, { wander: true, speed: NPC_WANDER_SPEED * 1.2 });
+  addNpc("elder",    "world", 200, 520, { wander: true });
+  addNpc("kid",      "world", 200, 100, { wander: true, speed: NPC_WANDER_SPEED * 1.2 });
   addNpc("merchant", "world", 250, 860, { wander: true });
 
   // iii) Building B – only after the room is furnished
   const furnished = () => rooms.buildingB.showFurniture;
   addNpc("villagerWoman", "buildingB", 120, 300, { visibleWhen: furnished });
-  addNpc("kid",           "buildingB", 400, 300, { visibleWhen: furnished });
+  addNpc("kid",           "buildingB", 200, 300, { visibleWhen: furnished });
   addNpc("elder",         "buildingB", 260, 480, { visibleWhen: furnished });
 
   // iv) Building C – one guard per corner (nearest free spot, so never on furniture)
