@@ -407,7 +407,7 @@ const rooms = {
     // stopped spawning (kills > 5), checked each time you walk in
     furniture: FURNITURE.buildingB,
     showFurniture: false,
-    furnishedWhen: () => showHealthBar && kills => 5,
+    furnishedWhen: () => showHealthBar && kills >= 5,
     spawnEnemy(){
       if (kills < 5) spawnEnemy();
     }
