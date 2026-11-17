@@ -395,7 +395,7 @@ const rooms = {
 
   buildingA:{
     name:"Building A", bg:"#8b4513",
-    doors:[{x:200, y:660, w:80, h:80, target:"world", doorTile:85}],
+    doors:[{x:200, y:900, w:80, h:80, target:"world", doorTile:85}],
     spawnEnemy(){},
     furniture: FURNITURE.buildingA
   },
