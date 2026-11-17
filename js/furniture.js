@@ -124,13 +124,12 @@ export const FURNITURE = {
     F(13, 1, 1, 1, 18, "s"),         // plant
 
     // Kitchen
-    F(88, 2, 1, 1, 23, "s"),         // counter
-    F(90, 2, 1, 3, 23, "s"),         // sink
-    F(92, 2, 1, 5, 23, "s"),         // stove
+    F(88, 2, 1, 1, 15, "s"),         // counter
+    F(90, 2, 1, 3, 15, "s"),         // sink
+    F(92, 2, 1, 5, 15, "s"),         // stove
 
-    F(30, 1, 2, 7, 22, "s"),         // fridge
-    F(163, 1, 2, 8, 22, "s"),        // glass cupboard
-    F(62, 2, 2, 9, 22, "s")          // bathtub
+    F(30, 1, 2, 7, 15, "s"),         // fridge
+    F(163, 1, 2, 8, 15, "s")        // glass cupboard
   ],
 
 
