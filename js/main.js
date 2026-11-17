@@ -552,7 +552,7 @@ function setupNpcs() {
 
   // ii) World – slow wanderers
   addNpc("elder",    "world", 100, 520, { wander: true });
-  addNpc("kid",      "world", 400, 620, { wander: true, speed: NPC_WANDER_SPEED * 1.2 });
+  addNpc("kid",      "world", 200, 400, { wander: true, speed: NPC_WANDER_SPEED * 1.2 });
   addNpc("merchant", "world", 250, 860, { wander: true });
 
   // iii) Building B – only after the room is furnished
