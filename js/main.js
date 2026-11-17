@@ -43,22 +43,64 @@ ctx.imageSmoothingEnabled = false;
 
 /* --------------------------------------------------------------
    SPRITE ANIMATION TABLE (direction aware)
+   assets/sprites/chars.json: 14 rows, 24x24 sprites.
+   Every character has 4 directions x 4 walk frames (16 sprites):
+   down, up, left, right. The virus has 4 frames and only "down".
 -------------------------------------------------------------- */
 const spriteAnimations = {
-  player: {
-    down:  [46, 47, 48, 49],
-    up:    [52, 53, 54, 55],
-    left:  [46, 47, 48, 49],
-    right: [46, 47, 48, 49]
-  },
-  monster: {
-    down:  [0, 1, 2, 3],
-    up:    [4, 5, 6, 7],
-    left:  [8, 9,10,11],
-    right: [12,13,14,15]
-  },
-  king:   { down: [23] },
-  virus:  { down: [69,70,71,72] }
+  player: { down: [0, 1, 2, 3],
+    up:   [4, 5, 6, 7],
+    left: [8, 9, 10, 11],
+    right:[12, 13, 14, 15] },
+  king: { down: [16, 17, 18, 19],
+    up:   [20, 21, 22, 23],
+    left: [24, 25, 26, 27],
+    right:[28, 29, 30, 31] },
+  villagerMan: { down: [32, 33, 34, 35],
+    up:   [36, 37, 38, 39],
+    left: [40, 41, 42, 43],
+    right:[44, 45, 46, 47] },
+  villagerWoman: { down: [48, 49, 50, 51],
+    up:   [52, 53, 54, 55],
+    left: [56, 57, 58, 59],
+    right:[60, 61, 62, 63] },
+  elder: { down: [64, 65, 66, 67],
+    up:   [68, 69, 70, 71],
+    left: [72, 73, 74, 75],
+    right:[76, 77, 78, 79] },
+  kid: { down: [80, 81, 82, 83],
+    up:   [84, 85, 86, 87],
+    left: [88, 89, 90, 91],
+    right:[92, 93, 94, 95] },
+  merchant: { down: [96, 97, 98, 99],
+    up:   [100, 101, 102, 103],
+    left: [104, 105, 106, 107],
+    right:[108, 109, 110, 111] },
+  guard: { down: [112, 113, 114, 115],
+    up:   [116, 117, 118, 119],
+    left: [120, 121, 122, 123],
+    right:[124, 125, 126, 127] },
+  farmer: { down: [128, 129, 130, 131],
+    up:   [132, 133, 134, 135],
+    left: [136, 137, 138, 139],
+    right:[140, 141, 142, 143] },
+  doctor: { down: [144, 145, 146, 147],
+    up:   [148, 149, 150, 151],
+    left: [152, 153, 154, 155],
+    right:[156, 157, 158, 159] },
+  chef: { down: [160, 161, 162, 163],
+    up:   [164, 165, 166, 167],
+    left: [168, 169, 170, 171],
+    right:[172, 173, 174, 175] },
+  wizard: { down: [176, 177, 178, 179],
+    up:   [180, 181, 182, 183],
+    left: [184, 185, 186, 187],
+    right:[188, 189, 190, 191] },
+  monster: { down: [192, 193, 194, 195],
+    up:   [196, 197, 198, 199],
+    left: [200, 201, 202, 203],
+    right:[204, 205, 206, 207] },
+  virus: { down: [208, 209, 210, 211] }
 };
 
 /* --------------------------------------------------------------
@@ -739,14 +781,8 @@ function drawPlayer(){
     const flashing = Math.floor(player.flashTimer/100)%2===0;
     ctx.globalAlpha = flashing ? 0.35 : 1;
   }
-
-  if (player.dir === "left"){
-    ctx.translate(player.x+player.w, player.y);
-    ctx.scale(-1,1);
-    drawSprite("player","right",player.animFrame,0,0,player.w,player.h);
-  }else{
-    drawSprite("player",player.dir,player.animFrame,player.x,player.y,player.w,player.h);
-  }
+  // every direction has its own sprites now (down / up / left / right)
+  drawSprite("player",player.dir,player.animFrame,player.x,player.y,player.w,player.h);
   ctx.restore();
 }
 function drawKing(){
@@ -756,15 +792,7 @@ function drawKing(){
 function drawEnemies(){
   enemies.forEach(e=>{
     const spriteName = e.type==="germ" ? "virus" : "monster";
-    if (e.dir === "left"){
-      ctx.save();
-      ctx.translate(e.x+e.w, e.y);
-      ctx.scale(-1,1);
-      drawSprite(spriteName,"right",e.animFrame,0,0,e.w,e.h);
-      ctx.restore();
-    }else{
-      drawSprite(spriteName,e.dir,e.animFrame,e.x,e.y,e.w,e.h);
-    }
+    drawSprite(spriteName,e.dir,e.animFrame,e.x,e.y,e.w,e.h);
 
     if (e.type==="germ"){
       const barW = Math.max(24, Math.min(e.w,70));
