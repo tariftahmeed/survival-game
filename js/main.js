@@ -552,7 +552,7 @@ function setupNpcs() {
 
   // ii) World – slow wanderers
   addNpc("elder",    "world", 100, 520, { wander: true });
-  addNpc("kid",      "world", 200, 400, { wander: true, speed: NPC_WANDER_SPEED * 1.2 });
+  addNpc("kid",      "world", 400, 620, { wander: true, speed: NPC_WANDER_SPEED * 1.2 });
   addNpc("merchant", "world", 250, 860, { wander: true });
 
   // iii) Building B – only after the room is furnished
@@ -710,21 +710,28 @@ function updateAnimation(entity, delta){
 -------------------------------------------------------------- */
 function updatePlayer(delta){
   let moving = false;
-  if (joystick.active){
+
+  // input: keyboard (WASD / arrows) wins if a key is held, otherwise the touch joystick
+  let nx = 0, ny = 0, hasInput = false;
+  const kv = keyboardVector();
+  if (kv){
+    nx = kv.x; ny = kv.y; hasInput = true;
+  } else if (joystick.active){
     const mag = Math.hypot(joystick.dx, joystick.dy);
-    if (mag > 2){
-      moving = true;
-      const nx = joystick.dx / mag;
-      const ny = joystick.dy / mag;
+    if (mag > 2){ nx = joystick.dx / mag; ny = joystick.dy / mag; hasInput = true; }
+  }
 
-      if (Math.abs(nx) > Math.abs(ny)) player.dir = nx > 0 ? "right" : "left";
-      else                             player.dir = ny > 0 ? "down" : "up";
+  if (hasInput){
+    moving = true;
 
-      // move one axis at a time so the player slides along walls
-      const sx = nx * player.speed, sy = ny * player.speed;
-      player.x += sx; if (blockedAt()) player.x -= sx;
-      player.y += sy; if (blockedAt()) player.y -= sy;
-    }
+    if (Math.abs(nx) > Math.abs(ny)) player.dir = nx > 0 ? "right" : "left";
+    else if (Math.abs(ny) > Math.abs(nx)) player.dir = ny > 0 ? "down" : "up";
+    // (perfect diagonals keep the current facing)
+
+    // move one axis at a time so the player slides along walls
+    const sx = nx * player.speed, sy = ny * player.speed;
+    player.x += sx; if (blockedAt()) player.x -= sx;
+    player.y += sy; if (blockedAt()) player.y -= sy;
   }
 
   if (moving) updateAnimation(player, delta);
@@ -1295,15 +1302,56 @@ if (window.visualViewport) window.visualViewport.addEventListener("resize", resi
 resize();
 
 /* --------------------------------------------------------------
-   KEYS: E = advance dialogue, B = toggle collision-box debug view
+   KEYS: WASD / arrow keys = move, E = advance dialogue,
+         B = toggle collision-box debug view
 -------------------------------------------------------------- */
+const heldKeys = new Set();
+
+// physical key codes (so WASD works on any keyboard layout)
+const MOVE_KEYS = {
+  KeyW:"up",    ArrowUp:"up",
+  KeyS:"down",  ArrowDown:"down",
+  KeyA:"left",  ArrowLeft:"left",
+  KeyD:"right", ArrowRight:"right"
+};
+
+/* Returns a normalised {x, y} direction from the held keys, or null if none */
+function keyboardVector() {
+  let x = 0, y = 0;
+  if (heldKeys.has("left"))  x -= 1;
+  if (heldKeys.has("right")) x += 1;
+  if (heldKeys.has("up"))    y -= 1;
+  if (heldKeys.has("down"))  y += 1;
+  if (x === 0 && y === 0) return null;
+  const mag = Math.hypot(x, y);
+  return { x: x / mag, y: y / mag };   // diagonals are not faster
+}
+
 window.addEventListener("keydown", e=>{
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+  const move = MOVE_KEYS[e.code];
+  if (move){
+    heldKeys.add(move);
+    if (e.code.startsWith("Arrow")) e.preventDefault();   // don't scroll the page
+    return;
+  }
+
   const k = e.key.toLowerCase();
   if (k === "b"){ debugBoxes = !debugBoxes; return; }
   if (k !== "e") return;
   const dlg = document.getElementById("dialogueBox");
   if (dlg && dlg.style.display !== "none") advanceKingDialogue();
 });
+
+window.addEventListener("keyup", e=>{
+  const move = MOVE_KEYS[e.code];
+  if (move) heldKeys.delete(move);
+});
+
+// don't get stuck walking if the window loses focus while a key is down
+window.addEventListener("blur", ()=> heldKeys.clear());
+document.addEventListener("visibilitychange", ()=>{ if (document.hidden) heldKeys.clear(); });
 
 /* --------------------------------------------------------------
    PAGE INITIALISATION
