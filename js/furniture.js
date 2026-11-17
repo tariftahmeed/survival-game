@@ -144,6 +144,7 @@ export const FURNITURE = {
     F(160, 1, 2, 1, 1, "s"),         // bookshelf A
     F(161, 1, 2, 2, 1, "s"),         // bookshelf B
     F(163, 1, 2, 3, 1, "s"),         // glass cupboard
+    F(60, 2, 2, 4, 1, "s"),          // fireplace
 
     F(172, 1, 2, 7, 1, "s"),         // glass cupboard 2
     F(169, 1, 2, 8, 1, "s"),         // bookshelf C
@@ -163,7 +164,6 @@ export const FURNITURE = {
     F(103, 1, 1, 3.5, 6.5, "s"),     // round table
 
     F(17, 1, 2, 7, 3, "s"),          // red floor lamp
-    F(60, 2, 2, 9, 7, "s"),          // fireplace
     F(14, 1, 1, 10, 5, "s"),         // big plant
 
     // Dining
@@ -183,7 +183,7 @@ export const FURNITURE = {
     F(9, 1, 1, 3, 23, "s"),          // basket
 
     // Guest bedroom
-    F(19, 1, 2, 5, 22, "s"),         // coat rack
+    F(19, 1, 2, 10, 22, "s"),         // coat rack
     F(25, 1, 2, 7, 22, "s"),         // mirror
     F(29, 1, 2, 8, 22, "s"),         // wardrobe dark
 
