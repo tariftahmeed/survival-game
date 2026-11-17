@@ -1,5 +1,5 @@
 /* ==============================================================
-   MAIN.JS – Hungry Reds (tilemap town + enterable buildings)
+   MAIN.JS – Hungry Reds (tilemap town + enterable buildings + NPCs)
    ============================================================== */
 
 /* --------------------------------------------------------------
@@ -229,6 +229,15 @@ const king = {
   currentLine:0, active:false, placed:false, talked:false
 };
 
+/* Where the king stands (also used to keep the guards away from him) */
+function kingHome() {
+  return {
+    x: canvas.width/2 - king.w/2,
+    y: canvas.height/2 - king.h/2 - 250,
+    w: king.w, h: king.h
+  };
+}
+
 /* --------------------------------------------------------------
    FIREBASE HELPERS
 -------------------------------------------------------------- */
@@ -278,10 +287,23 @@ function askForName() {
 function rectanglesTouch(a,b){
   return a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y;
 }
+function inflate(r, p){
+  return { x:r.x - p, y:r.y - p, w:r.w + p*2, h:r.h + p*2 };
+}
 
 /* Smaller "feet" box used for walls and doors */
 function hitbox() {
   return { x: player.x + 14, y: player.y + 36, w: player.w - 28, h: player.h - 40 };
+}
+
+/* Same feet box, for any 64x64 character standing at (x, y) */
+function feetAt(x, y) {
+  return { x: x + 14, y: y + 36, w: 36, h: 24 };
+}
+
+/* Furniture of a room by name, regardless of whether it is currently visible */
+function roomFurniture(roomName) {
+  return rooms[roomName]?.furniture || [];
 }
 
 /* Furniture that is currently visible in the room the player is in */
@@ -406,6 +428,236 @@ const rooms = {
 };
 let currentRoom = rooms.world;
 
+/* ==============================================================
+   NPCs
+   --------------------------------------------------------------
+   i)   Building A : a villager man + a villager woman (standing)
+   ii)  World      : an elder, a kid and a merchant wander slowly
+   iii) Building B : villager woman, kid and elder (only once the
+                     room is furnished, i.e. after the monsters are gone)
+   iv)  Building C : guards in the corners (never on top of furniture)
+   v)   World      : a doctor beside building D once it appears
+
+   Interior size (used for keeping NPCs inside the floor area).
+   If your interiors are a different size, change these numbers.
+============================================================== */
+const ROOM_SIZE = {
+  buildingA: { w: 540, h: 740 },
+  buildingB: { w: 540, h: 740 },
+  buildingC: { w: 540, h: 740 },
+  buildingD: { w: 540, h: 740 }
+};
+
+const NPC_WANDER_SPEED  = 0.55;   // player is 4.5, so this is really slow
+const NPC_WANDER_RADIUS = 220;    // how far from its start point a wanderer roams
+const NPC_FACE_DISTANCE = 110;    // standing NPCs turn toward the player inside this range
+
+let npcs = [];
+
+function roomSize(roomName) {
+  if (roomName === "world") return { w: canvas.width, h: canvas.height };
+  return ROOM_SIZE[roomName] || { w: canvas.width, h: 740 };
+}
+
+/* Can a 64x64 character stand with its top-left at (x, y)?
+   - world:     not on solid tiles, not in any building body (even ones that
+                have not appeared yet), and not blocking any door
+   - interiors: inside the floor, not on furniture, not blocking the door,
+                not next to the king
+   `others` (optional) = NPCs that must not overlap */
+function spotFree(roomName, x, y, others = null) {
+  const feet = feetAt(x, y);
+  const { w, h } = roomSize(roomName);
+
+  if (roomName === "world") {
+    if (x < 0 || y < 0 || x + 64 > w || y + 64 > h) return false;
+
+    const c0 = Math.floor(feet.x / TILE), c1 = Math.floor((feet.x + feet.w) / TILE);
+    const r0 = Math.floor(feet.y / TILE), r1 = Math.floor((feet.y + feet.h) / TILE);
+    for (let r = r0; r <= r1; r++)
+      for (let c = c0; c <= c1; c++)
+        if (isSolidTile(c, r)) return false;
+
+    for (const b of buildings) {
+      if (rectanglesTouch(feet, inflate(bodyRect(b), 4))) return false;
+      if (rectanglesTouch(feet, inflate(doorRect(b), 24))) return false;
+    }
+  } else {
+    const m = TILE;
+    if (feet.x < m || feet.x + feet.w > w - m) return false;
+    if (feet.y < m + 20 || feet.y + feet.h > h - m) return false;
+
+    if (furnSolids(roomFurniture(roomName)).some(r => rectanglesTouch(feet, inflate(r, 4)))) return false;
+    if ((rooms[roomName].doors || []).some(d => rectanglesTouch(feet, inflate(d, 16)))) return false;
+    if (roomName === "buildingC" && rectanglesTouch(feet, inflate(kingHome(), 36))) return false;
+  }
+
+  if (others) {
+    for (const o of others) {
+      if (Math.hypot(o.x - x, o.y - y) < 64) return false;
+    }
+  }
+  return true;
+}
+
+/* Nearest free spot to an anchor point (grid search, closest first) */
+function findSpot(roomName, ax, ay, others = null, maxR = 700) {
+  const { w, h } = roomSize(roomName);
+  const cand = [];
+  for (let y = 0; y <= h - 64; y += 8) {
+    for (let x = 0; x <= w - 64; x += 8) {
+      const d = Math.hypot(x - ax, y - ay);
+      if (d <= maxR) cand.push({ x, y, d });
+    }
+  }
+  cand.sort((a, b) => a.d - b.d);
+  for (const p of cand) if (spotFree(roomName, p.x, p.y, others)) return p;
+  return null;
+}
+
+function addNpc(sprite, roomName, ax, ay, opts = {}) {
+  const same = npcs.filter(n => n.room === roomName);
+  const pos = findSpot(roomName, ax, ay, same);
+  if (!pos) { console.warn(`No free spot for ${sprite} in ${roomName}`); return null; }
+
+  const dir = opts.dir || "down";
+  const n = {
+    sprite, room: roomName,
+    x: pos.x, y: pos.y, w: 64, h: 64,
+    dir, defaultDir: dir,
+    wander: !!opts.wander,
+    speed: opts.speed || NPC_WANDER_SPEED,
+    homeX: pos.x, homeY: pos.y,
+    target: null,
+    pause: 500 + Math.random() * 2500,
+    animTimer: 0, animFrame: 0, animFps: 5,
+    animFrames: getAnimationFrameCount(sprite, "down"),
+    visibleWhen: opts.visibleWhen || null
+  };
+  npcs.push(n);
+  return n;
+}
+
+/* NPCs that are in the room the player is in (and currently visible) */
+function npcsHere() {
+  return npcs.filter(n => rooms[n.room] === currentRoom && (!n.visibleWhen || n.visibleWhen()));
+}
+
+function setupNpcs() {
+  npcs = [];
+
+  // i) Building A – villagers standing around
+  addNpc("villagerMan",   "buildingA", 130, 260, { dir: "down" });
+  addNpc("villagerWoman", "buildingA", 380, 260, { dir: "down" });
+
+  // ii) World – slow wanderers
+  addNpc("elder",    "world", 100, 520, { wander: true });
+  addNpc("kid",      "world", 400, 620, { wander: true, speed: NPC_WANDER_SPEED * 1.2 });
+  addNpc("merchant", "world", 250, 860, { wander: true });
+
+  // iii) Building B – only after the room is furnished
+  const furnished = () => rooms.buildingB.showFurniture;
+  addNpc("villagerWoman", "buildingB", 120, 300, { visibleWhen: furnished });
+  addNpc("kid",           "buildingB", 400, 300, { visibleWhen: furnished });
+  addNpc("elder",         "buildingB", 260, 480, { visibleWhen: furnished });
+
+  // iv) Building C – one guard per corner (nearest free spot, so never on furniture)
+  const gm = TILE, { w: cw, h: ch } = roomSize("buildingC");
+  addNpc("guard", "buildingC", gm,           gm,           { dir: "down" });
+  addNpc("guard", "buildingC", cw - 64 - gm, gm,           { dir: "down" });
+  addNpc("guard", "buildingC", gm,           ch - 64 - gm, { dir: "up" });
+  addNpc("guard", "buildingC", cw - 64 - gm, ch - 64 - gm, { dir: "up" });
+
+  // v) Doctor – stands beside building D once it appears
+  const bD = buildings.find(b => b.target === "buildingD");
+  if (bD) {
+    const d = doorRect(bD);
+    addNpc("doctor", "world", d.x + d.w + 40, d.y + d.h - 30, {
+      dir: "down",
+      visibleWhen: () => bD.appears()
+    });
+  }
+}
+
+/* --------------------------------------------------------------
+   NPC UPDATE
+-------------------------------------------------------------- */
+function faceToward(n, tx, ty) {
+  const dx = tx - (n.x + n.w/2), dy = ty - (n.y + n.h/2);
+  n.dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : (dy > 0 ? "down" : "up");
+}
+
+function wanderNpc(n, delta) {
+  const pcx = player.x + player.w/2, pcy = player.y + player.h/2;
+  const ncx = n.x + n.w/2,           ncy = n.y + n.h/2;
+
+  // stop and look at the player when they walk up close
+  if (Math.hypot(pcx - ncx, pcy - ncy) < 80) {
+    faceToward(n, pcx, pcy);
+    n.animFrame = 0; n.animTimer = 0;
+    return;
+  }
+
+  if (n.pause > 0) {
+    n.pause -= delta;
+    n.animFrame = 0; n.animTimer = 0;
+    return;
+  }
+
+  if (!n.target) {
+    const ang = Math.random() * Math.PI * 2;
+    const dist = 40 + Math.random() * NPC_WANDER_RADIUS;
+    n.target = {
+      x: n.homeX + Math.cos(ang) * Math.min(dist, NPC_WANDER_RADIUS),
+      y: n.homeY + Math.sin(ang) * Math.min(dist, NPC_WANDER_RADIUS)
+    };
+  }
+
+  const dx = n.target.x - n.x, dy = n.target.y - n.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist < 3) {
+    n.target = null;
+    n.pause = 1500 + Math.random() * 3500;
+    n.animFrame = 0;
+    return;
+  }
+
+  const step = Math.min(dist, n.speed * delta / 16.67);
+  const mx = dx / dist * step, my = dy / dist * step;
+
+  let moved = false;
+  if (spotFree("world", n.x + mx, n.y)) { n.x += mx; moved = true; }
+  if (spotFree("world", n.x, n.y + my)) { n.y += my; moved = true; }
+
+  if (!moved) {                          // bumped into something – rest, then pick a new target
+    n.target = null;
+    n.pause = 400 + Math.random() * 800;
+    n.animFrame = 0;
+    return;
+  }
+
+  n.dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : (dy > 0 ? "down" : "up");
+  updateAnimation(n, delta);
+}
+
+function updateNpcs(delta) {
+  const pcx = player.x + player.w/2, pcy = player.y + player.h/2;
+
+  npcsHere().forEach(n => {
+    if (n.wander) { wanderNpc(n, delta); return; }
+
+    // standing NPCs: look at the player when close, otherwise go back to default facing
+    const d = Math.hypot(pcx - (n.x + n.w/2), pcy - (n.y + n.h/2));
+    if (d < NPC_FACE_DISTANCE) faceToward(n, pcx, pcy);
+    else n.dir = n.defaultDir;
+    n.animFrame = 0;
+  });
+}
+
+function drawNpc(n) {
+  drawSprite(n.sprite, n.dir, n.animFrame, n.x, n.y, n.w, n.h);
+}
+
 /* --------------------------------------------------------------
    RESET & INITIAL SETUP
 -------------------------------------------------------------- */
@@ -433,6 +685,8 @@ function reset(){
   if (dlg) dlg.style.display = "none";
   const score = document.getElementById("score");
   if (score) score.textContent = "0";
+
+  setupNpcs();
 }
 
 /* --------------------------------------------------------------
@@ -628,8 +882,9 @@ function collide(){ return enemies.some(e=>rectanglesTouch(player,e)); }
 -------------------------------------------------------------- */
 function maybePlaceKing(){
   if (king.placed) return;
-  king.x = canvas.width/2 - king.w/2;
-  king.y = canvas.height/2 - king.h/2 - 250;
+  const h = kingHome();
+  king.x = h.x;
+  king.y = h.y;
   king.placed = true;
 }
 function startKingDialogue(){
@@ -789,23 +1044,21 @@ function drawKing(){
   if (currentRoom!==rooms.buildingC) return;
   drawSprite("king","down",0,king.x,king.y,king.w,king.h);
 }
-function drawEnemies(){
-  enemies.forEach(e=>{
-    const spriteName = e.type==="germ" ? "virus" : "monster";
-    drawSprite(spriteName,e.dir,e.animFrame,e.x,e.y,e.w,e.h);
+function drawEnemy(e){
+  const spriteName = e.type==="germ" ? "virus" : "monster";
+  drawSprite(spriteName,e.dir,e.animFrame,e.x,e.y,e.w,e.h);
 
-    if (e.type==="germ"){
-      const barW = Math.max(24, Math.min(e.w,70));
-      const maxH = Math.max(e.initialHealth, e.health);
-      const ratio = Math.max(0, Math.min(1, e.health / maxH));
-      const barX = e.x + e.w/2 - barW/2;
-      const barY = e.y - 8;
-      ctx.fillStyle = "rgba(0,0,0,0.55)";
-      ctx.fillRect(barX, barY, barW, 5);
-      ctx.fillStyle = "#aaff55";
-      ctx.fillRect(barX, barY, barW*ratio, 5);
-    }
-  });
+  if (e.type==="germ"){
+    const barW = Math.max(24, Math.min(e.w,70));
+    const maxH = Math.max(e.initialHealth, e.health);
+    const ratio = Math.max(0, Math.min(1, e.health / maxH));
+    const barX = e.x + e.w/2 - barW/2;
+    const barY = e.y - 8;
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillRect(barX, barY, barW, 5);
+    ctx.fillStyle = "#aaff55";
+    ctx.fillRect(barX, barY, barW*ratio, 5);
+  }
 }
 
 /* --------------------------------------------------------------
@@ -834,8 +1087,8 @@ function drawRoomName(){
 }
 
 /* Press "B" to show collision boxes
-   world: red = building body, blue = door, yellow = feet
-   interiors: green = solid furniture, yellow = feet */
+   world: red = building body, blue = door, yellow = feet, orange = NPC feet
+   interiors: green = solid furniture, yellow = feet, orange = NPC feet */
 function drawDebugBoxes(){
   if (!debugBoxes) return;
   ctx.save(); ctx.lineWidth = 2;
@@ -850,15 +1103,17 @@ function drawDebugBoxes(){
     ctx.strokeStyle = "blue";
     currentRoom.doors.forEach(d => ctx.strokeRect(d.x, d.y, d.w, d.h));
   }
+  ctx.strokeStyle = "orange";
+  npcsHere().forEach(n => { const r = feetAt(n.x, n.y); ctx.strokeRect(r.x, r.y, r.w, r.h); });
   const hb = hitbox(); ctx.strokeStyle = "yellow"; ctx.strokeRect(hb.x, hb.y, hb.w, hb.h);
   ctx.restore();
 }
 
 /* --------------------------------------------------------------
    FULL DRAW CALL
-   - buildings are depth-sorted against the player (world)
-   - furniture is depth-sorted against the player (interiors)
-   - rugs ("floor") are drawn under everything, chandeliers ("over") on top
+   Everything that stands on the ground is depth-sorted by its feet:
+   buildings (world), furniture (interiors), NPCs, king, enemies, player.
+   Rugs ("floor") are drawn under everything, chandeliers ("over") on top.
 -------------------------------------------------------------- */
 function draw(){
   ctx.imageSmoothingEnabled = false;
@@ -868,28 +1123,36 @@ function draw(){
   const furn = activeFurniture();
   furn.filter(f => f.floor).forEach(f => drawFurn(ctx, f));          // rugs
 
-  const inWorld = currentRoom === rooms.world;
-  const feet = player.y + player.h;
-  const visible = inWorld ? buildings.filter(b => b.appears()) : [];
-  const base = f => f.y + f.h * TILE;
-  const furnLayer = furn
-    .filter(f => !f.floor && !f.over)
-    .sort((a, b) => base(a) - base(b));
-
-  // buildings whose base is above the player's feet are drawn behind the player
-  visible.filter(b => b.y + b.h <= feet).forEach(drawBuilding);
-
   drawDoors();
   drawDecor();
-  furnLayer.filter(f => base(f) <= feet).forEach(f => drawFurn(ctx, f));   // behind player
-  drawKing();
-  drawEnemies();
-  drawPlayer();
-  furnLayer.filter(f => base(f) >  feet).forEach(f => drawFurn(ctx, f));   // in front of player
-  furn.filter(f => f.over).forEach(f => drawFurn(ctx, f));                 // chandeliers
 
-  // buildings below the player's feet are drawn in front (roof covers the player)
-  visible.filter(b => b.y + b.h > feet).forEach(drawBuilding);
+  const inWorld = currentRoom === rooms.world;
+  const feet = player.y + player.h;
+  const base = f => f.y + f.h * TILE;
+
+  const items = [];
+
+  if (inWorld) {
+    buildings.filter(b => b.appears())
+      .forEach(b => items.push({ y: b.y + b.h, draw: () => drawBuilding(b) }));
+  }
+
+  furn.filter(f => !f.floor && !f.over)
+    .forEach(f => items.push({ y: base(f), draw: () => drawFurn(ctx, f) }));
+
+  npcsHere().forEach(n => items.push({ y: n.y + n.h, draw: () => drawNpc(n) }));
+
+  if (currentRoom === rooms.buildingC)
+    items.push({ y: king.y + king.h, draw: drawKing });
+
+  enemies.forEach(e => items.push({ y: e.y + e.h, draw: () => drawEnemy(e) }));
+
+  items.push({ y: feet + 0.01, draw: drawPlayer });
+
+  items.sort((a, b) => a.y - b.y);
+  items.forEach(it => it.draw());
+
+  furn.filter(f => f.over).forEach(f => drawFurn(ctx, f));                 // chandeliers
 
   drawDebugBoxes();
   drawJoystick();
@@ -920,6 +1183,7 @@ function loop(timestamp){
   }
 
   updatePlayer(delta);
+  updateNpcs(delta);
   updateEnemies(delta);
   handleEnemyCollisions();
   updateKillEffects(delta);
@@ -1087,3 +1351,4 @@ window.startGame = startGame;
 window.advanceKingDialogue = advanceKingDialogue;
 window.spriteImages = spriteImages;
 window.spriteAnimations = spriteAnimations;
+window.getNpcs = () => npcs;
