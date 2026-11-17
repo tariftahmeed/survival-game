@@ -395,14 +395,14 @@ const rooms = {
 
   buildingA:{
     name:"Building A", bg:"#8b4513",
-    doors:[{x:200, y:1000, w:80, h:80, target:"world", doorTile:85}],
+    doors:[{x:200, y:1100, w:80, h:80, target:"world", doorTile:85}],
     spawnEnemy(){},
     furniture: FURNITURE.buildingA
   },
 
   buildingB:{
     name:"Building B", bg:"#3b5998",
-    doors:[{x:200, y:1000, w:80, h:80, target:"world", doorTile:85, requiredKills:5, showLock:true}],
+    doors:[{x:200, y:1100, w:80, h:80, target:"world", doorTile:85, requiredKills:5, showLock:true}],
     // furniture only appears once the health bar is unlocked AND enemies have
     // stopped spawning (kills > 5), checked each time you walk in
     furniture: FURNITURE.buildingB,
@@ -415,14 +415,14 @@ const rooms = {
 
   buildingC:{
     name:"Building C", bg:"#d1e8f0",
-    doors:[{x:200, y:1000, w:80, h:80, target:"world", doorTile:89}],
+    doors:[{x:200, y:1100, w:80, h:80, target:"world", doorTile:89}],
     furniture: FURNITURE.buildingC,
     spawnEnemy(){}
   },
 
   buildingD:{
     name:"Building D", bg:"#403050",
-    doors:[{x:200, y:1000, w:80, h:80, target:"world", doorTile:89}],
+    doors:[{x:200, y:1100, w:80, h:80, target:"world", doorTile:89}],
     spawnEnemy(){ spawnGermEnemy(); }
   }
 };
