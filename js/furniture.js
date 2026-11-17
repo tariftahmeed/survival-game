@@ -110,26 +110,26 @@ export const FURNITURE = {
     F(14, 1, 1, 10, 7, "s"),         // big plant
 
     // Dining area
-    F(96, 1, 1, 4, 19, "s"),         // chair front
-    F(96, 1, 1, 5, 19, "s"),         // chair front
+    F(96, 1, 1, 4, 17, "s"),         // chair front
+    F(96, 1, 1, 5, 17, "s"),         // chair front
 
-    F(82, 2, 1, 4, 20, "s"),         // clothed table
+    F(82, 2, 1, 4, 18, "s"),         // clothed table
 
-    F(99, 1, 1, 4, 21, "s"),         // chair back
-    F(99, 1, 1, 5, 21, "s"),         // chair back
+    F(99, 1, 1, 4, 19, "s"),         // chair back
+    F(99, 1, 1, 5, 19, "s"),         // chair back
 
     // Storage
-    F(10, 1, 1, 1, 19, "s"),         // crate
-    F(11, 1, 1, 10, 19, "s"),        // barrel
-    F(13, 1, 1, 1, 18, "s"),         // plant
+    F(10, 1, 1, 1, 17, "s"),         // crate
+    F(11, 1, 1, 10, 17, "s"),        // barrel
+    F(13, 1, 1, 1, 16, "s"),         // plant
 
     // Kitchen
     F(88, 2, 1, 1, 15, "s"),         // counter
     F(90, 2, 1, 3, 15, "s"),         // sink
     F(92, 2, 1, 5, 15, "s"),         // stove
 
-    F(30, 1, 2, 7, 15, "s"),         // fridge
-    F(163, 1, 2, 8, 15, "s")        // glass cupboard
+    F(30, 1, 2, 7, 14, "s"),         // fridge
+    F(163, 1, 2, 8, 14, "s")        // glass cupboard
   ],
 
 
